@@ -1,0 +1,7 @@
+@import "tailwindcss";
+::-webkit-scrollbar {
+    display: none;
+}
+.tabular-nums {
+    font-variant-numeric: tabular-nums;
+}
