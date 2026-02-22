@@ -233,7 +233,7 @@ pub struct Contest {
 }
 
 #[derive(Debug)]
-pub struct PyriteState {
+pub struct ContestState {
     pub contest: Option<Contest>,
     pub judgement_types: HashMap<String, JudgementType>,
     pub groups: HashMap<String, Group>,
@@ -244,11 +244,14 @@ pub struct PyriteState {
     pub submissions: HashMap<String, Submission>,
     pub judgements: HashMap<String, Judgement>,
     pub awards: HashMap<String, Award>,
+    pub leaderboard_pre_freeze: Vec<TeamStatus>,
+    pub leaderboard_finalized: Vec<TeamStatus>,
+    pub remaining_judgements_after_freeze: Vec<Judgement>,
 }
 
-impl PyriteState {
+impl ContestState {
     pub fn new() -> Self {
-        PyriteState {
+        ContestState {
             contest: None,
             judgement_types: HashMap::new(),
             groups: HashMap::new(),
@@ -259,6 +262,9 @@ impl PyriteState {
             submissions: HashMap::new(),
             judgements: HashMap::new(),
             awards: HashMap::new(),
+            leaderboard_pre_freeze: Vec::new(),
+            leaderboard_finalized: Vec::new(),
+            remaining_judgements_after_freeze: Vec::new(),
         }
     }
 }
@@ -295,7 +301,7 @@ where
     let minutes: i64 = parts[1].parse().map_err(serde::de::Error::custom)?;
     let seconds: f64 = parts[2].parse().map_err(serde::de::Error::custom)?;
 
-    let total_secs = (hours * 3600 + minutes * 60) as i64 + seconds as i64;
+    let total_secs = (hours * 3600 + minutes * 60) + seconds as i64;
     Ok(if negative {
         -Duration::seconds(total_secs)
     } else {
@@ -323,7 +329,7 @@ where
         let minutes: i64 = parts[1].parse().map_err(serde::de::Error::custom)?;
         let seconds: f64 = parts[2].parse().map_err(serde::de::Error::custom)?;
 
-        let total_secs = (hours * 3600 + minutes * 60) as i64 + seconds as i64;
+        let total_secs = (hours * 3600 + minutes * 60) + seconds as i64;
         Ok(Some(if negative {
             -Duration::seconds(total_secs)
         } else {
@@ -408,7 +414,6 @@ pub struct TeamStatus {
 pub struct ProblemStat {
     pub solved: bool,
     /// If attempted_during_freeze is false, then there's no submission during freeze, just
-    pub attempted_during_freeze: bool,
     pub penalty: i64,
     pub submissions_before_solved: i32,
     pub first_ac_time: Option<DateTime<FixedOffset>>,
@@ -440,14 +445,12 @@ impl TeamStatus {
         judgement_type_id: Option<&str>,
         judgement_types: &HashMap<String, JudgementType>,
         contest_start_time: Option<DateTime<FixedOffset>>,
-        contest_freeze_time: Option<DateTime<FixedOffset>>,
     ) {
         let problem_stat =
             self.problem_stats
                 .entry(problem_id.to_string())
                 .or_insert(ProblemStat {
                     solved: false,
-                    attempted_during_freeze: false,
                     penalty: 0,
                     submissions_before_solved: 0,
                     first_ac_time: None,
@@ -457,48 +460,32 @@ impl TeamStatus {
             return;
         }
 
-        if let Some(judgement_type_id) = judgement_type_id {
-            if let Some(judgement_type) = judgement_types.get(judgement_type_id) {
-                if judgement_type.penalty || judgement_type.solved {
-                    problem_stat.submissions_before_solved += 1;
-                }
+        if let Some(judgement_type_id) = judgement_type_id
+            && let Some(judgement_type) = judgement_types.get(judgement_type_id)
+        {
+            if judgement_type.penalty || judgement_type.solved {
+                problem_stat.submissions_before_solved += 1;
+            }
 
-                problem_stat.attempted_during_freeze =
-                    if let Some(contest_freeze_time) = contest_freeze_time {
-                        submission_time > contest_freeze_time
-                    } else {
-                        error!("No contest freeze time specified!");
-                        unreachable!()
-                    };
+            if judgement_type.solved {
+                problem_stat.solved = true;
+                problem_stat.first_ac_time = Some(submission_time);
 
-                if judgement_type.solved {
-                    problem_stat.solved = true;
-                    problem_stat.first_ac_time = Some(submission_time);
+                let contest_time = if let Some(start_time) = contest_start_time {
+                    submission_time - start_time
+                } else {
+                    error!("No contest start time specified!");
+                    return;
+                };
 
-                    let contest_time = if let Some(start_time) = contest_start_time {
-                        submission_time - start_time
-                    } else {
-                        error!("No contest start time specified!");
-                        return;
-                    };
+                let penalty_minutes = (problem_stat.submissions_before_solved - 1) * 20;
+                let problem_penalty = contest_time.num_minutes() + penalty_minutes as i64;
+                problem_stat.penalty = problem_penalty;
 
-                    let penalty_minutes = (problem_stat.submissions_before_solved - 1) * 20;
-                    let problem_penalty = contest_time.num_minutes() + penalty_minutes as i64;
-                    problem_stat.penalty = problem_penalty;
-
-                    if problem_stat.attempted_during_freeze {
-                        // If solved happen during scoreboard freeze, we don't add penalty yet, wait for scoreboard roll
-                        return;
-                    }
-
-                    self.total_points += 1;
-                    self.total_penalty = self.total_penalty + problem_penalty;
-                    if self
-                        .last_ac_time
-                        .map_or(true, |last| submission_time > last)
-                    {
-                        self.last_ac_time = Some(submission_time);
-                    }
+                self.total_points += 1;
+                self.total_penalty += problem_penalty;
+                if self.last_ac_time.is_none_or(|last| submission_time > last) {
+                    self.last_ac_time = Some(submission_time);
                 }
             }
         }
@@ -535,12 +522,8 @@ impl Ord for TeamStatus {
         }
         // Sort by last AC time
         match (self.last_ac_time, other.last_ac_time) {
-            (Some(self_time), Some(other_time)) => {
-                return self_time.cmp(&other_time);
-            }
-            (None, None) => {
-                return self.team_id.cmp(&other.team_id);
-            }
+            (Some(self_time), Some(other_time)) => self_time.cmp(&other_time),
+            (None, None) => self.team_id.cmp(&other.team_id),
             (_, _) => {
                 error!(
                     "Cmp branch should not happen, self {:#?} other {:#?}",
