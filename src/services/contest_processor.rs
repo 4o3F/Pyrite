@@ -3,8 +3,8 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 use chrono::{DateTime, FixedOffset};
 use tracing::{error, info, warn};
 
-use crate::services::config_loader::PyriteConfig;
 use crate::models::{ContestState, Judgement, TeamStatus};
+use crate::services::config_loader::PyriteConfig;
 
 fn apply_submission_filters(state: &mut ContestState, config: &PyriteConfig) {
     if config.filter_team_submissions.is_empty() {
@@ -45,6 +45,48 @@ fn apply_submission_filters(state: &mut ContestState, config: &PyriteConfig) {
     );
 }
 
+fn apply_team_group_remap(state: &mut ContestState, config: &PyriteConfig) -> Result<(), String> {
+    if config.team_group_map.is_empty() {
+        return Ok(());
+    }
+
+    let mut errors = Vec::new();
+
+    for (team_id, target_group_id) in &config.team_group_map {
+        if !state.groups.contains_key(target_group_id) {
+            errors.push(format!(
+                "team_group_map target group {} for team {} does not exist",
+                target_group_id, team_id
+            ));
+            continue;
+        }
+
+        let Some(team) = state.teams.get_mut(team_id) else {
+            errors.push(format!(
+                "team_group_map team {} does not exist in event feed",
+                team_id
+            ));
+            continue;
+        };
+
+        team.group_ids = vec![target_group_id.clone()];
+        info!(
+            "Remapped team {} ({}) to group {}",
+            team.id, team.name, target_group_id
+        );
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Invalid team_group_map entries ({}): {}",
+            errors.len(),
+            errors.join(" | ")
+        ))
+    }
+}
+
 fn validate_all_submissions_judged(state: &ContestState) -> Result<(), String> {
     let judged_submission_ids = state
         .judgements
@@ -61,6 +103,43 @@ fn validate_all_submissions_judged(state: &ContestState) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn validate_team_groups(state: &ContestState) -> Result<(), String> {
+    let mut issues = Vec::new();
+
+    for team in state.teams.values() {
+        if team.group_ids.is_empty() {
+            issues.push(format!("{} ({}) has no group_ids", team.id, team.name));
+            continue;
+        }
+
+        let unknown_group_ids: Vec<&str> = team
+            .group_ids
+            .iter()
+            .map(String::as_str)
+            .filter(|group_id| !state.groups.contains_key(*group_id))
+            .collect();
+
+        if !unknown_group_ids.is_empty() {
+            issues.push(format!(
+                "{} ({}) has unknown group_ids: {}",
+                team.id,
+                team.name,
+                unknown_group_ids.join(", ")
+            ));
+        }
+    }
+
+    if issues.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Invalid team group data for {} team(s): {}",
+            issues.len(),
+            issues.join(" | ")
+        ))
+    }
 }
 
 fn build_initial_team_status_map(
@@ -160,7 +239,9 @@ pub fn validate_and_transform(
 ) -> Result<Vec<String>, String> {
     info!("Event feed parse complete, validating...");
     apply_submission_filters(state, config);
+    apply_team_group_remap(state, config)?;
 
+    validate_team_groups(state)?;
     validate_all_submissions_judged(state)?;
 
     let contest = state.contest.as_ref().ok_or_else(|| {
@@ -219,23 +300,23 @@ pub fn validate_and_transform(
     state.leaderboard_finalized = map_to_sorted_leaderboard(finalized_map);
     state.remaining_judgements_after_freeze = remaining_judgements_after_freeze;
 
-    for (rank, item) in state.leaderboard_pre_freeze.iter().enumerate() {
-        info!(
-            "Pre-freeze Rank {:0>3} Penalty {} TeamName: {}",
-            rank + 1,
-            item.total_penalty,
-            item.team_name
-        );
-    }
+    // for (rank, item) in state.leaderboard_pre_freeze.iter().enumerate() {
+    //     info!(
+    //         "Pre-freeze Rank {:0>3} Penalty {} TeamName: {}",
+    //         rank + 1,
+    //         item.total_penalty,
+    //         item.team_name
+    //     );
+    // }
 
-    for (rank, item) in state.leaderboard_finalized.iter().enumerate() {
-        info!(
-            "Finalized Rank {:0>3} Penalty {} TeamName: {}",
-            rank + 1,
-            item.total_penalty,
-            item.team_name
-        );
-    }
+    // for (rank, item) in state.leaderboard_finalized.iter().enumerate() {
+    //     info!(
+    //         "Finalized Rank {:0>3} Penalty {} TeamName: {}",
+    //         rank + 1,
+    //         item.total_penalty,
+    //         item.team_name
+    //     );
+    // }
 
     info!(
         "Remaining judgements after freeze: {}",

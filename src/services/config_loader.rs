@@ -1,3 +1,4 @@
+use eframe::egui::ahash::HashMap;
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
@@ -9,6 +10,10 @@ pub struct PyriteConfig {
     /// Will fix the issues like DomJudge using a hard coded non-exisiting team to run problem validation.
     #[serde(default)]
     pub filter_team_submissions: Vec<String>,
+    /// This will remap the group of a team to another one.
+    /// Will fix issues like a wrong team group that can't be changed before contest finalization.
+    #[serde(default)]
+    pub team_group_map: HashMap<String, String>,
 }
 
 pub fn load_pyrite_config(cdp_folder: &str) -> Result<PyriteConfig, String> {

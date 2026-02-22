@@ -290,7 +290,7 @@ pub fn ui(ui: &mut egui::Ui, data_path: &mut Option<String>) -> LoadDataAction {
 
     ui.add_space(8.0);
     if state.is_parsing {
-        ui.horizontal(|ui| {
+        ui.vertical_centered(|ui| {
             ui.add(egui::Spinner::new());
             ui.label(format!(
                 "Parsing... lines: {} | errors: {}",
@@ -323,7 +323,10 @@ pub fn ui(ui: &mut egui::Ui, data_path: &mut Option<String>) -> LoadDataAction {
         ui.add_space(8.0);
         egui::Frame::group(ui.style())
             .fill(egui::Color32::from_rgb(56, 48, 20))
-            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(190, 160, 70)))
+            .stroke(egui::Stroke::new(
+                1.0,
+                egui::Color32::from_rgb(190, 160, 70),
+            ))
             .show(ui, |ui| {
                 ui.label(egui::RichText::new("Parse Warnings").strong());
                 for warning in &state.warnings {
@@ -332,9 +335,7 @@ pub fn ui(ui: &mut egui::Ui, data_path: &mut Option<String>) -> LoadDataAction {
             });
 
         ui.add_space(8.0);
-        if !state.warnings_acknowledged
-            && ui.button("Proceed despite warnings").clicked()
-        {
+        if !state.warnings_acknowledged && ui.button("Proceed despite warnings").clicked() {
             state.warnings_acknowledged = true;
         }
     }

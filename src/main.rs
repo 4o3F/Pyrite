@@ -8,6 +8,7 @@ use screens::present::PresentAction;
 use screens::set_award::SetAwardAction;
 use services::config_loader::PyriteConfig;
 use std::fs;
+use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
@@ -38,15 +39,12 @@ impl Default for PyriteApp {
 
 impl eframe::App for PyriteApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |_ui| {});
-
-        egui::Area::new(egui::Id::new("centered_content"))
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .show(ctx, |ui| {
-                ui.vertical_centered(|ui| match self.state {
-                    PyriteState::LoadData => {
-                        if let LoadDataAction::Continue =
-                            screens::load_data::ui(ui, &mut self.data_path)
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.add_space(8.0);
+            match self.state {
+                PyriteState::LoadData => {
+                    ui.vertical_centered(|ui| {
+                        if let LoadDataAction::Continue = screens::load_data::ui(ui, &mut self.data_path)
                         {
                             if let Some(parsed_state) =
                                 screens::load_data::take_parsed_contest_state()
@@ -63,29 +61,32 @@ impl eframe::App for PyriteApp {
                                 info!("Cannot continue: parsed contest state is missing");
                             }
                         }
-                    }
-                    PyriteState::SetAward => {
-                        if let Some(contest_state) = self.contest_state.as_mut() {
-                            match screens::set_award::ui(ui, contest_state) {
-                                SetAwardAction::Continue => {
-                                    info!("Transition: SetAward -> Present");
-                                    self.state = PyriteState::Present;
-                                }
-                                SetAwardAction::Stay => {}
+                    });
+                }
+                PyriteState::SetAward => {
+                    if let Some(contest_state) = self.contest_state.as_mut() {
+                        match screens::set_award::ui(ui, contest_state) {
+                            SetAwardAction::Continue => {
+                                info!("Transition: SetAward -> Present");
+                                self.state = PyriteState::Present;
                             }
-                        } else {
-                            ui.colored_label(
-                                egui::Color32::RED,
-                                "Contest data missing. Go back to Load Data.",
-                            );
+                            SetAwardAction::Stay => {}
                         }
+                    } else {
+                        ui.colored_label(
+                            egui::Color32::RED,
+                            "Contest data missing. Go back to Load Data.",
+                        );
                     }
-                    PyriteState::Present => match screens::present::ui(ui) {
+                }
+                PyriteState::Present => {
+                    ui.vertical_centered(|ui| match screens::present::ui(ui) {
                         PresentAction::Stay => {}
-                    },
-                });
+                    });
+                }
+            }
             });
-    }
+    }    
 }
 
 fn init_tracing() -> Option<WorkerGuard> {
@@ -116,6 +117,25 @@ fn init_tracing() -> Option<WorkerGuard> {
     Some(file_guard)
 }
 
+fn install_embedded_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "noto_sans_cjk".to_string(),
+        Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/NotoSansCJKsc-Regular.otf"
+        ))),
+    );
+
+    if let Some(proportional) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        proportional.insert(0, "noto_sans_cjk".to_string());
+    }
+    if let Some(monospace) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+        monospace.insert(0, "noto_sans_cjk".to_string());
+    }
+
+    ctx.set_fonts(fonts);
+}
+
 fn main() -> eframe::Result<()> {
     let _log_guard = init_tracing();
     info!("Starting Pyrite");
@@ -131,6 +151,7 @@ fn main() -> eframe::Result<()> {
         "Pyrite",
         options,
         Box::new(|cc| {
+            install_embedded_fonts(&cc.egui_ctx);
             cc.egui_ctx.set_pixels_per_point(1.1);
 
             let mut style = (*cc.egui_ctx.style()).clone();

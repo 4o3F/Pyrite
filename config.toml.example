@@ -1,0 +1,2 @@
+filter_team_submissions = ["domjudge"]
+team_group_map = { "16" = "A" }
