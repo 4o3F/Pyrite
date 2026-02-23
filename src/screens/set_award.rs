@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::sync::{Mutex, OnceLock};
 
-use crate::models::{Award, ContestState};
+use crate::models::{Award, ContestState, TeamStatus};
+use crate::services::contest_processor;
 
 pub enum SetAwardAction {
     Stay,
@@ -24,6 +25,8 @@ struct SetAwardUiState {
     citation: String,
     team_ids_csv: String,
     message: Option<String>,
+    computed_finalized_leaderboard: Option<Vec<TeamStatus>>,
+    finalized_cache_key: String,
 }
 
 impl Default for SetAwardUiState {
@@ -41,6 +44,8 @@ impl Default for SetAwardUiState {
             citation: String::new(),
             team_ids_csv: String::new(),
             message: None,
+            computed_finalized_leaderboard: None,
+            finalized_cache_key: String::new(),
         }
     }
 }
@@ -57,7 +62,7 @@ fn compute_group_key(contest_state: &ContestState) -> String {
         .values()
         .map(|group| (group.sortorder, group.name.clone(), group.id.clone()))
         .collect();
-    items.sort_by(|a, b| a.cmp(b));
+    items.sort();
     items
         .into_iter()
         .map(|(sortorder, name, id)| format!("{sortorder}:{name}:{id}"))
@@ -104,6 +109,7 @@ fn sync_group_selection(state: &mut SetAwardUiState, contest_state: &ContestStat
 
 fn build_medal_preview(
     contest_state: &ContestState,
+    finalized_leaderboard: &[TeamStatus],
     selected_group_ids: &BTreeMap<String, bool>,
     gold_count: usize,
     silver_count: usize,
@@ -114,8 +120,7 @@ fn build_medal_preview(
         .filter_map(|(group_id, selected)| if *selected { Some(group_id.as_str()) } else { None })
         .collect();
 
-    let eligible: Vec<(String, String)> = contest_state
-        .leaderboard_finalized
+    let eligible: Vec<(String, String)> = finalized_leaderboard
         .iter()
         .filter_map(|team_status| {
             let team = contest_state.teams.get(&team_status.team_id)?;
@@ -140,6 +145,32 @@ fn build_medal_preview(
     let bronze = eligible[silver_end..bronze_end].to_vec();
 
     (gold, silver, bronze, eligible.len())
+}
+
+fn compute_finalized_cache_key(contest_state: &ContestState) -> String {
+    format!(
+        "{}:{}:{}:{}:{}",
+        contest_state.teams.len(),
+        contest_state.groups.len(),
+        contest_state.submissions.len(),
+        contest_state.judgements.len(),
+        contest_state.leaderboard_pre_freeze.len()
+    )
+}
+
+fn ensure_finalized_leaderboard_cached(
+    ui_state: &mut SetAwardUiState,
+    contest_state: &ContestState,
+) -> Result<(), String> {
+    let key = compute_finalized_cache_key(contest_state);
+    if ui_state.finalized_cache_key == key && ui_state.computed_finalized_leaderboard.is_some() {
+        return Ok(());
+    }
+
+    let leaderboard = contest_processor::compute_finalized_leaderboard(contest_state)?;
+    ui_state.computed_finalized_leaderboard = Some(leaderboard);
+    ui_state.finalized_cache_key = key;
+    Ok(())
 }
 
 fn show_medal_scroll(ui: &mut egui::Ui, id_salt: &str, title: &str, teams: &[(String, String)]) {
@@ -208,6 +239,66 @@ fn load_awards_from_file(contest_state: &mut ContestState) -> Result<String, Str
     ))
 }
 
+fn apply_group_filter_for_presentation(
+    contest_state: &mut ContestState,
+    selected_group_ids: &BTreeMap<String, bool>,
+) -> String {
+    let selected_groups: HashSet<&str> = selected_group_ids
+        .iter()
+        .filter_map(|(group_id, selected)| if *selected { Some(group_id.as_str()) } else { None })
+        .collect();
+
+    let allowed_team_ids: HashSet<String> = contest_state
+        .teams
+        .values()
+        .filter(|team| {
+            team.group_ids
+                .iter()
+                .any(|group_id| selected_groups.contains(group_id.as_str()))
+        })
+        .map(|team| team.id.clone())
+        .collect();
+
+    let original_team_count = contest_state.teams.len();
+    let original_submission_count = contest_state.submissions.len();
+    let original_judgement_count = contest_state.judgements.len();
+
+    contest_state
+        .teams
+        .retain(|team_id, _| allowed_team_ids.contains(team_id));
+    contest_state
+        .accounts
+        .retain(|_, account| allowed_team_ids.contains(&account.team_id));
+
+    contest_state
+        .submissions
+        .retain(|_, submission| allowed_team_ids.contains(&submission.team_id));
+    let allowed_submission_ids: HashSet<String> = contest_state.submissions.keys().cloned().collect();
+    contest_state
+        .judgements
+        .retain(|_, judgement| allowed_submission_ids.contains(&judgement.submission_id));
+
+    contest_state
+        .leaderboard_pre_freeze
+        .retain(|team_status| allowed_team_ids.contains(&team_status.team_id));
+
+    for award in contest_state.awards.values_mut() {
+        award
+            .team_ids
+            .retain(|team_id| allowed_team_ids.contains(team_id));
+    }
+
+    format!(
+        "Filtered presentation set: teams {} -> {}, submissions {} -> {}, judgements {} -> {}",
+        original_team_count,
+        contest_state.teams.len(),
+        original_submission_count,
+        contest_state.submissions.len(),
+        original_judgement_count,
+        contest_state.judgements.len()
+    )
+}
+
 pub fn ui(ui: &mut egui::Ui, contest_state: &mut ContestState) -> SetAwardAction {
     let mut action = SetAwardAction::Stay;
     egui::ScrollArea::vertical()
@@ -245,9 +336,22 @@ pub fn ui(ui: &mut egui::Ui, contest_state: &mut ContestState) -> SetAwardAction
 
             sync_group_selection(&mut state, contest_state);
 
+            if let Err(err) = ensure_finalized_leaderboard_cached(&mut state, contest_state) {
+                state.message = Some(format!("Failed to compute finalized leaderboard: {err}"));
+                state.computed_finalized_leaderboard = Some(Vec::new());
+                state.finalized_cache_key.clear();
+            }
+
+            let empty_finalized: Vec<TeamStatus> = Vec::new();
+            let finalized_board = state
+                .computed_finalized_leaderboard
+                .as_deref()
+                .unwrap_or(empty_finalized.as_slice());
+
             let (gold_preview, silver_preview, bronze_preview, eligible_count) =
                 build_medal_preview(
                     contest_state,
+                    finalized_board,
                     &state.selected_group_ids,
                     state.medal_gold_count,
                     state.medal_silver_count,
@@ -520,6 +624,12 @@ pub fn ui(ui: &mut egui::Ui, contest_state: &mut ContestState) -> SetAwardAction
             ui.add_space(12.0);
 
             if ui.button("Present").clicked() {
+                state.message = Some(apply_group_filter_for_presentation(
+                    contest_state,
+                    &state.selected_group_ids,
+                ));
+                state.computed_finalized_leaderboard = None;
+                state.finalized_cache_key.clear();
                 action = SetAwardAction::Continue;
             }
         });

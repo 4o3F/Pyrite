@@ -246,7 +246,6 @@ pub struct ContestState {
     pub awards: HashMap<String, Award>,
     pub leaderboard_pre_freeze: Vec<TeamStatus>,
     pub leaderboard_finalized: Vec<TeamStatus>,
-    pub remaining_judgements_after_freeze: Vec<Judgement>,
 }
 
 impl ContestState {
@@ -264,7 +263,6 @@ impl ContestState {
             awards: HashMap::new(),
             leaderboard_pre_freeze: Vec::new(),
             leaderboard_finalized: Vec::new(),
-            remaining_judgements_after_freeze: Vec::new(),
         }
     }
 }
@@ -413,7 +411,8 @@ pub struct TeamStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProblemStat {
     pub solved: bool,
-    /// If attempted_during_freeze is false, then there's no submission during freeze, just
+    /// If attempted_during_freeze is false, then there's no submission during freeze
+    pub attempted_during_freeze: bool,
     pub penalty: i64,
     pub submissions_before_solved: i32,
     pub first_ac_time: Option<DateTime<FixedOffset>>,
@@ -445,12 +444,14 @@ impl TeamStatus {
         judgement_type_id: Option<&str>,
         judgement_types: &HashMap<String, JudgementType>,
         contest_start_time: Option<DateTime<FixedOffset>>,
+        contest_freeze_time: Option<DateTime<FixedOffset>>,
     ) {
         let problem_stat =
             self.problem_stats
                 .entry(problem_id.to_string())
                 .or_insert(ProblemStat {
                     solved: false,
+                    attempted_during_freeze: false,
                     penalty: 0,
                     submissions_before_solved: 0,
                     first_ac_time: None,
@@ -467,6 +468,14 @@ impl TeamStatus {
                 problem_stat.submissions_before_solved += 1;
             }
 
+            problem_stat.attempted_during_freeze =
+                if let Some(contest_freeze_time) = contest_freeze_time {
+                    submission_time > contest_freeze_time
+                } else {
+                    error!("No contest freeze time specified!");
+                    unreachable!()
+                };
+
             if judgement_type.solved {
                 problem_stat.solved = true;
                 problem_stat.first_ac_time = Some(submission_time);
@@ -481,6 +490,11 @@ impl TeamStatus {
                 let penalty_minutes = (problem_stat.submissions_before_solved - 1) * 20;
                 let problem_penalty = contest_time.num_minutes() + penalty_minutes as i64;
                 problem_stat.penalty = problem_penalty;
+
+                if problem_stat.attempted_during_freeze {
+                    // If solved happen during scoreboard freeze, we don't add penalty yet, wait for scoreboard roll
+                    return;
+                }
 
                 self.total_points += 1;
                 self.total_penalty += problem_penalty;

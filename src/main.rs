@@ -80,13 +80,26 @@ impl eframe::App for PyriteApp {
                     }
                 }
                 PyriteState::Present => {
-                    ui.vertical_centered(|ui| match screens::present::ui(ui) {
-                        PresentAction::Stay => {}
-                    });
+                    if let Some(contest_state) = self.contest_state.as_mut() {
+                        match screens::present::ui(
+                            ui,
+                            ctx,
+                            contest_state,
+                            self.data_path.as_deref(),
+                            &self.config,
+                        ) {
+                            PresentAction::Stay => {}
+                        }
+                    } else {
+                        ui.colored_label(
+                            egui::Color32::RED,
+                            "Contest data missing. Go back to Load Data.",
+                        );
+                    }
                 }
             }
-            });
-    }    
+        });
+    }
 }
 
 fn init_tracing() -> Option<WorkerGuard> {

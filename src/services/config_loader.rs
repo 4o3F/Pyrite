@@ -4,6 +4,26 @@ use std::fs;
 use std::path::Path;
 use tracing::info;
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct PresentationConfig {
+    #[serde(default = "default_rows_per_page")]
+    pub rows_per_page: usize,
+    #[serde(default = "default_row_move_animation_seconds")]
+    pub row_move_animation_seconds: f32,
+    #[serde(default = "default_logo_extension")]
+    pub logo_extension: String,
+}
+
+impl Default for PresentationConfig {
+    fn default() -> Self {
+        Self {
+            rows_per_page: default_rows_per_page(),
+            row_move_animation_seconds: default_row_move_animation_seconds(),
+            logo_extension: default_logo_extension(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct PyriteConfig {
     /// This will indicate which submission to filter out.
@@ -14,6 +34,20 @@ pub struct PyriteConfig {
     /// Will fix issues like a wrong team group that can't be changed before contest finalization.
     #[serde(default)]
     pub team_group_map: HashMap<String, String>,
+    #[serde(default)]
+    pub presentation: PresentationConfig,
+}
+
+fn default_rows_per_page() -> usize {
+    12
+}
+
+fn default_row_move_animation_seconds() -> f32 {
+    0.45
+}
+
+fn default_logo_extension() -> String {
+    "jpg".to_string()
 }
 
 pub fn load_pyrite_config(cdp_folder: &str) -> Result<PyriteConfig, String> {

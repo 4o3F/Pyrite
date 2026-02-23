@@ -202,6 +202,7 @@ fn apply_judgement_to_status(
     team_status_map: &mut HashMap<String, TeamStatus>,
     judgement: &Judgement,
     contest_start_time: DateTime<FixedOffset>,
+    contest_freeze_time: DateTime<FixedOffset>,
 ) -> Result<(), String> {
     let Some(submission) = state.submissions.get(&judgement.submission_id) else {
         return Ok(());
@@ -228,9 +229,68 @@ fn apply_judgement_to_status(
         judgement.judgement_type_id.as_deref(),
         &state.judgement_types,
         Some(contest_start_time),
+        Some(contest_freeze_time),
     );
 
     Ok(())
+}
+
+fn recompute_team_totals(team_status_map: &mut HashMap<String, TeamStatus>) {
+    for team in team_status_map.values_mut() {
+        team.total_points = 0;
+        team.total_penalty = 0;
+        team.last_ac_time = None;
+
+        for stat in team.problem_stats.values() {
+            if stat.solved {
+                team.total_points += 1;
+                team.total_penalty += stat.penalty;
+                if let Some(ac_time) = stat.first_ac_time
+                    && team.last_ac_time.is_none_or(|last| ac_time > last)
+                {
+                    team.last_ac_time = Some(ac_time);
+                }
+            }
+        }
+    }
+}
+
+pub fn compute_finalized_leaderboard(state: &ContestState) -> Result<Vec<TeamStatus>, String> {
+    let contest = state.contest.as_ref().ok_or_else(|| {
+        let message = "Contest not defined".to_string();
+        error!("{message}");
+        message
+    })?;
+
+    let contest_start_time = contest.start_time.ok_or_else(|| {
+        let message = "Contest start time not defined".to_string();
+        error!("{message}");
+        message
+    })?;
+
+    let contest_freeze_time = contest.scoreboard_freeze_time.ok_or_else(|| {
+        let message = "Contest freeze time not defined".to_string();
+        error!("{message}");
+        message
+    })?;
+
+    let judgements = build_judgement_order(state);
+    let mut finalized_map = build_initial_team_status_map(state)?;
+
+    for judgement in judgements {
+        apply_judgement_to_status(
+            state,
+            &mut finalized_map,
+            judgement,
+            contest_start_time,
+            contest_freeze_time,
+        )?;
+    }
+
+    // add_submission intentionally suppresses score update for solved-during-freeze in pre-freeze flow.
+    // For finalized board, totals should include all solved results.
+    recompute_team_totals(&mut finalized_map);
+    Ok(map_to_sorted_leaderboard(finalized_map))
 }
 
 pub fn validate_and_transform(
@@ -265,8 +325,6 @@ pub fn validate_and_transform(
     let judgements = build_judgement_order(state);
 
     let mut pre_freeze_map = build_initial_team_status_map(state)?;
-    let mut finalized_map = pre_freeze_map.clone();
-    let mut remaining_judgements_after_freeze = Vec::new();
     let mut warnings = Vec::new();
 
     for judgement in judgements {
@@ -280,25 +338,23 @@ pub fn validate_and_transform(
             continue;
         };
 
-        let submission_time = submission.time.or(judgement.start_time).ok_or_else(|| {
+        let _submission_time = submission.time.or(judgement.start_time).ok_or_else(|| {
             let message = format!("Unknown submission time for submission {}", submission.id);
             error!("{message}");
             message
         })?;
 
-        if submission_time > contest_freeze_time {
-            remaining_judgements_after_freeze.push(judgement.clone());
-        } else {
-            apply_judgement_to_status(state, &mut pre_freeze_map, judgement, contest_start_time)?;
-        }
-
-        // Finalized board applies all judgements.
-        apply_judgement_to_status(state, &mut finalized_map, judgement, contest_start_time)?;
+        apply_judgement_to_status(
+            state,
+            &mut pre_freeze_map,
+            judgement,
+            contest_start_time,
+            contest_freeze_time,
+        )?;
     }
 
     state.leaderboard_pre_freeze = map_to_sorted_leaderboard(pre_freeze_map);
-    state.leaderboard_finalized = map_to_sorted_leaderboard(finalized_map);
-    state.remaining_judgements_after_freeze = remaining_judgements_after_freeze;
+    state.leaderboard_finalized = compute_finalized_leaderboard(state)?;
 
     // for (rank, item) in state.leaderboard_pre_freeze.iter().enumerate() {
     //     info!(
@@ -309,18 +365,9 @@ pub fn validate_and_transform(
     //     );
     // }
 
-    // for (rank, item) in state.leaderboard_finalized.iter().enumerate() {
-    //     info!(
-    //         "Finalized Rank {:0>3} Penalty {} TeamName: {}",
-    //         rank + 1,
-    //         item.total_penalty,
-    //         item.team_name
-    //     );
-    // }
-
     info!(
-        "Remaining judgements after freeze: {}",
-        state.remaining_judgements_after_freeze.len()
+        "Pre-freeze leaderboard built from {} judged submissions",
+        state.judgements.len()
     );
 
     Ok(warnings)
