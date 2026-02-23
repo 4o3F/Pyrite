@@ -3,5 +3,6 @@ team_group_map = { "16" = "A" }
 
 [presentation]
 rows_per_page = 12
-row_move_animation_seconds = 0.45
+scroll_animation_seconds = 0.35
+row_fly_animation_seconds = 0.45
 logo_extension = "png"

@@ -8,8 +8,13 @@ use tracing::info;
 pub struct PresentationConfig {
     #[serde(default = "default_rows_per_page")]
     pub rows_per_page: usize,
-    #[serde(default = "default_row_move_animation_seconds")]
-    pub row_move_animation_seconds: f32,
+    #[serde(default = "default_scroll_animation_seconds")]
+    pub scroll_animation_seconds: f32,
+    #[serde(
+        default = "default_row_fly_animation_seconds",
+        alias = "row_move_animation_seconds"
+    )]
+    pub row_fly_animation_seconds: f32,
     #[serde(default = "default_logo_extension")]
     pub logo_extension: String,
 }
@@ -18,7 +23,8 @@ impl Default for PresentationConfig {
     fn default() -> Self {
         Self {
             rows_per_page: default_rows_per_page(),
-            row_move_animation_seconds: default_row_move_animation_seconds(),
+            scroll_animation_seconds: default_scroll_animation_seconds(),
+            row_fly_animation_seconds: default_row_fly_animation_seconds(),
             logo_extension: default_logo_extension(),
         }
     }
@@ -42,7 +48,11 @@ fn default_rows_per_page() -> usize {
     12
 }
 
-fn default_row_move_animation_seconds() -> f32 {
+fn default_scroll_animation_seconds() -> f32 {
+    0.35
+}
+
+fn default_row_fly_animation_seconds() -> f32 {
     0.45
 }
 

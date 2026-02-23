@@ -13,11 +13,32 @@ pub enum PresentAction {
 
 #[derive(Default)]
 struct PresentUiState {
-    /// Scroll offset in points for the scoreboard viewport.
-    viewpoint_offset: f32,
+    scroll_current_offset: f32,
+    scroll_target_offset: f32,
+    scroll_anim_start_offset: f32,
+    scroll_anim_start_time: Option<f64>,
+    scroll_anim_duration: f32,
     current_reveal_index: Option<usize>,
     reveal_initialized: bool,
+    pending_steps: usize,
+    pending_solved_reveal: Option<PendingSolvedReveal>,
+    last_sorted_team_ids: Vec<String>,
+    active_row_anims: HashMap<String, RowMoveAnim>,
     logo_cache: HashMap<String, Option<egui::TextureHandle>>,
+}
+
+#[derive(Clone)]
+struct PendingSolvedReveal {
+    team_id: String,
+    problem_id: String,
+}
+
+#[derive(Clone, Copy)]
+struct RowMoveAnim {
+    from_index: usize,
+    to_index: usize,
+    started_at: f64,
+    duration_sec: f32,
 }
 
 #[derive(Clone)]
@@ -60,6 +81,10 @@ pub fn ui(
 ) -> PresentAction {
     PRESENT_UI_STATE.with(|cell| {
         let mut state = cell.borrow_mut();
+        let now = now_seconds(ctx);
+        let scroll_duration = config.presentation.scroll_animation_seconds.max(0.01);
+        let row_fly_seconds_per_row = config.presentation.row_fly_animation_seconds.max(0.01);
+        state.scroll_anim_duration = scroll_duration;
 
         let metrics = compute_frame_metrics(
             ui.painter(),
@@ -134,16 +159,35 @@ pub fn ui(
         ui.add_space(4.0);
 
         let scroll_height = (ui.available_height()).max(80.0);
-        sync_reveal_focus_on_enter(&mut state, contest_state, &metrics, scroll_height);
+        sync_reveal_focus_on_enter(
+            &mut state,
+            contest_state,
+            &metrics,
+            scroll_height,
+            now,
+            scroll_duration,
+        );
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
-            handle_space_step(
+            state.pending_steps = state.pending_steps.saturating_add(1);
+        }
+        while state.pending_steps > 0 {
+            let progressed = handle_space_step(
                 &mut state,
                 contest_state,
                 &ordered_problem_ids,
                 metrics.row_height,
                 scroll_height,
+                now,
+                row_fly_seconds_per_row,
             );
+            state.pending_steps = state.pending_steps.saturating_sub(1);
+            if !progressed {
+                state.pending_steps = 0;
+                break;
+            }
         }
+        let scroll_animating = update_scroll_animation(&mut state, now);
+        let row_animating = cleanup_and_has_active_row_anims(&mut state, now);
 
         let content_height = row_count as f32 * metrics.row_height;
 
@@ -151,7 +195,7 @@ pub fn ui(
             .id_salt("present_pre_freeze_scroll")
             .auto_shrink([false, false])
             .max_height(scroll_height)
-            .vertical_scroll_offset(state.viewpoint_offset)
+            .vertical_scroll_offset(state.scroll_current_offset)
             .show_viewport(ui, |ui, viewport| {
                 if row_count == 0 {
                     ui.label("No teams in pre-freeze leaderboard.");
@@ -163,13 +207,28 @@ pub fn ui(
                     egui::Sense::hover(),
                 );
 
-                let start_row = (viewport.min.y / metrics.row_height).floor().max(0.0) as usize;
-                let end_row = ((viewport.max.y / metrics.row_height).ceil() as usize)
-                    .min(row_count.saturating_sub(1));
+                let mut draw_rows: Vec<(usize, f32, bool)> = (0..row_count)
+                    .map(|idx| {
+                        let team_id = contest_state.leaderboard_pre_freeze[idx].team_id.as_str();
+                        let animated_y =
+                            row_content_y_for_team(&state, team_id, idx, metrics.row_height, now);
+                        let rising_top_layer = is_rising_row_anim_active(&state, team_id, now);
+                        (idx, animated_y, rising_top_layer)
+                    })
+                    .filter(|(_, row_y, _)| {
+                        let row_min = *row_y;
+                        let row_max = row_min + metrics.row_height;
+                        row_max >= viewport.min.y && row_min <= viewport.max.y
+                    })
+                    .collect();
+                draw_rows.sort_by(|a, b| a.1.total_cmp(&b.1));
 
-                for idx in start_row..=end_row {
+                for (idx, row_y, rising_top_layer) in draw_rows.iter().copied() {
+                    if rising_top_layer {
+                        continue;
+                    }
                     let team = &contest_state.leaderboard_pre_freeze[idx];
-                    let row_top = rect.top() + idx as f32 * metrics.row_height;
+                    let row_top = rect.top() + row_y;
                     let row_rect = egui::Rect::from_min_size(
                         egui::pos2(rect.left(), row_top),
                         egui::vec2(rect.width(), metrics.row_height),
@@ -185,33 +244,52 @@ pub fn ui(
                     };
                     ui.painter().rect_filled(row_rect, 0.0, bg);
 
-                    // Debug: visualize left / center / right zones.
-                    // let left_rect = egui::Rect::from_min_max(
-                    //     egui::pos2(layout.rank_rect.left(), row_rect.top()),
-                    //     egui::pos2(layout.logo_rect.right(), row_rect.bottom()),
-                    // );
-                    // let right_rect = egui::Rect::from_min_max(
-                    //     egui::pos2(layout.solved_rect.left(), row_rect.top()),
-                    //     egui::pos2(layout.time_rect.right(), row_rect.bottom()),
-                    // );
-                    // ui.painter().rect_stroke(
-                    //     left_rect,
-                    //     0.0,
-                    //     egui::Stroke::new(1.0, egui::Color32::YELLOW),
-                    //     egui::StrokeKind::Inside,
-                    // );
-                    // ui.painter().rect_stroke(
-                    //     layout.center_rect,
-                    //     0.0,
-                    //     egui::Stroke::new(1.0, egui::Color32::LIGHT_BLUE),
-                    //     egui::StrokeKind::Inside,
-                    // );
-                    // ui.painter().rect_stroke(
-                    //     right_rect,
-                    //     0.0,
-                    //     egui::Stroke::new(1.0, egui::Color32::LIGHT_RED),
-                    //     egui::StrokeKind::Inside,
-                    // );
+                    render_left_zone(
+                        ui,
+                        &mut state,
+                        ctx,
+                        contest_state,
+                        team,
+                        idx + 1,
+                        data_path,
+                        config,
+                        &layout,
+                        &metrics,
+                    );
+                    render_center_zone(
+                        ui,
+                        team,
+                        &problems,
+                        &layout,
+                        &metrics,
+                        solved_bg,
+                        attempted_bg,
+                        attempted_freeze_bg,
+                        untouched_bg,
+                    );
+                    render_right_zone(ui, team, &layout, &metrics);
+                }
+
+                for (idx, row_y, rising_top_layer) in draw_rows {
+                    if !rising_top_layer {
+                        continue;
+                    }
+                    let team = &contest_state.leaderboard_pre_freeze[idx];
+                    let row_top = rect.top() + row_y;
+                    let row_rect = egui::Rect::from_min_size(
+                        egui::pos2(rect.left(), row_top),
+                        egui::vec2(rect.width(), metrics.row_height),
+                    );
+                    let layout = compute_row_layout(row_rect, &metrics);
+
+                    let bg = if state.current_reveal_index == Some(idx) {
+                        focused_row_bg
+                    } else if idx % 2 == 0 {
+                        even_row_bg
+                    } else {
+                        odd_row_bg
+                    };
+                    ui.painter().rect_filled(row_rect, 0.0, bg);
 
                     render_left_zone(
                         ui,
@@ -239,9 +317,37 @@ pub fn ui(
                     render_right_zone(ui, team, &layout, &metrics);
                 }
             });
+
+        if scroll_animating || row_animating {
+            ctx.request_repaint();
+        }
     });
 
     PresentAction::Stay
+}
+
+fn now_seconds(ctx: &egui::Context) -> f64 {
+    ctx.input(|input| input.time)
+}
+
+fn anim_progress(now: f64, started_at: f64, duration_sec: f32) -> f32 {
+    if duration_sec <= 0.0 {
+        return 1.0;
+    }
+    ((now - started_at) / f64::from(duration_sec)).clamp(0.0, 1.0) as f32
+}
+
+fn ease_in_out_sine(t: f32) -> f32 {
+    -(f32::cos(std::f32::consts::PI * t) - 1.0) * 0.5
+}
+
+fn ease_out_cubic(t: f32) -> f32 {
+    let inv = 1.0 - t;
+    1.0 - inv * inv * inv
+}
+
+fn lerp_f32(from: f32, to: f32, t: f32) -> f32 {
+    from + (to - from) * t
 }
 
 fn team_has_pending_freeze(team: &TeamStatus) -> bool {
@@ -274,15 +380,20 @@ fn find_next_pending_problem_id(
         .map(|(problem_id, _)| problem_id.clone())
 }
 
-fn apply_reveal_for_problem(team: &mut TeamStatus, problem_id: &str) -> bool {
-    let Some(problem_stat) = team.problem_stats.get_mut(problem_id) else {
-        return false;
-    };
+fn reveal_problem_result(team: &mut TeamStatus, problem_id: &str) -> Option<bool> {
+    let problem_stat = team.problem_stats.get_mut(problem_id)?;
     if !problem_stat.attempted_during_freeze {
-        return false;
+        return None;
     }
 
     problem_stat.attempted_during_freeze = false;
+    Some(problem_stat.solved)
+}
+
+fn apply_solved_problem_score(team: &mut TeamStatus, problem_id: &str) -> bool {
+    let Some(problem_stat) = team.problem_stats.get(problem_id) else {
+        return false;
+    };
     if !problem_stat.solved {
         return false;
     }
@@ -315,13 +426,139 @@ fn row_offset_for_index(
     target.clamp(0.0, max_offset)
 }
 
+fn set_scroll_target_for_index(
+    state: &mut PresentUiState,
+    index: usize,
+    row_height: f32,
+    viewport_height: f32,
+    row_count: usize,
+    now: f64,
+    animate: bool,
+) {
+    let target = row_offset_for_index(index, row_height, viewport_height, row_count);
+    if !animate {
+        state.scroll_current_offset = target;
+        state.scroll_target_offset = target;
+        state.scroll_anim_start_offset = target;
+        state.scroll_anim_start_time = None;
+        return;
+    }
+
+    state.scroll_anim_start_offset = state.scroll_current_offset;
+    state.scroll_target_offset = target;
+    state.scroll_anim_start_time = Some(now);
+}
+
+fn update_scroll_animation(state: &mut PresentUiState, now: f64) -> bool {
+    let Some(started_at) = state.scroll_anim_start_time else {
+        return false;
+    };
+
+    let progress = anim_progress(now, started_at, state.scroll_anim_duration);
+    let eased = ease_in_out_sine(progress);
+    state.scroll_current_offset = lerp_f32(
+        state.scroll_anim_start_offset,
+        state.scroll_target_offset,
+        eased,
+    );
+
+    if progress >= 1.0 {
+        state.scroll_current_offset = state.scroll_target_offset;
+        state.scroll_anim_start_time = None;
+        return false;
+    }
+
+    true
+}
+
+fn spawn_row_move_animations(
+    state: &mut PresentUiState,
+    before_order: &[String],
+    after_order: &[String],
+    now: f64,
+    seconds_per_row: f32,
+) {
+    let mut before_map = HashMap::with_capacity(before_order.len());
+    for (idx, team_id) in before_order.iter().enumerate() {
+        before_map.insert(team_id.as_str(), idx);
+    }
+
+    for (new_index, team_id) in after_order.iter().enumerate() {
+        let Some(old_index) = before_map.get(team_id.as_str()).copied() else {
+            continue;
+        };
+        if old_index == new_index {
+            continue;
+        }
+        let duration_sec = row_move_duration_seconds(old_index, new_index, seconds_per_row);
+        state.active_row_anims.insert(
+            team_id.clone(),
+            RowMoveAnim {
+                from_index: old_index,
+                to_index: new_index,
+                started_at: now,
+                duration_sec,
+            },
+        );
+    }
+}
+
+fn row_move_duration_seconds(from_index: usize, to_index: usize, seconds_per_row: f32) -> f32 {
+    let distance_rows = from_index.abs_diff(to_index) as f32;
+    (distance_rows * seconds_per_row).max(0.01)
+}
+
+fn row_content_y_for_team(
+    state: &PresentUiState,
+    team_id: &str,
+    logical_index: usize,
+    row_height: f32,
+    now: f64,
+) -> f32 {
+    let Some(anim) = state.active_row_anims.get(team_id) else {
+        return logical_index as f32 * row_height;
+    };
+
+    let progress = anim_progress(now, anim.started_at, anim.duration_sec);
+    let from_y = anim.from_index as f32 * row_height;
+    let to_y = anim.to_index as f32 * row_height;
+    if progress >= 1.0 {
+        return to_y;
+    }
+
+    lerp_f32(from_y, to_y, ease_out_cubic(progress))
+}
+
+fn is_rising_row_anim_active(state: &PresentUiState, team_id: &str, now: f64) -> bool {
+    let Some(anim) = state.active_row_anims.get(team_id) else {
+        return false;
+    };
+    anim.to_index < anim.from_index && anim_progress(now, anim.started_at, anim.duration_sec) < 1.0
+}
+
+fn cleanup_and_has_active_row_anims(state: &mut PresentUiState, now: f64) -> bool {
+    state
+        .active_row_anims
+        .retain(|_, anim| anim_progress(now, anim.started_at, anim.duration_sec) < 1.0);
+    !state.active_row_anims.is_empty()
+}
+
 fn sync_reveal_focus_on_enter(
     state: &mut PresentUiState,
     contest_state: &ContestState,
     metrics: &FrameMetrics,
     viewport_height: f32,
+    now: f64,
+    duration_sec: f32,
 ) {
     let board = &contest_state.leaderboard_pre_freeze;
+    if state.last_sorted_team_ids.is_empty() {
+        state.last_sorted_team_ids = board.iter().map(|team| team.team_id.clone()).collect();
+    }
+    if state.scroll_anim_duration <= 0.0 {
+        state.scroll_anim_duration = duration_sec;
+    }
+
     if !state.reveal_initialized
         || state
             .current_reveal_index
@@ -330,8 +567,15 @@ fn sync_reveal_focus_on_enter(
         state.current_reveal_index = find_last_pending_index(board);
         state.reveal_initialized = true;
         if let Some(index) = state.current_reveal_index {
-            state.viewpoint_offset =
-                row_offset_for_index(index, metrics.row_height, viewport_height, board.len());
+            set_scroll_target_for_index(
+                state,
+                index,
+                metrics.row_height,
+                viewport_height,
+                board.len(),
+                now,
+                false,
+            );
         }
     }
 }
@@ -342,26 +586,73 @@ fn handle_space_step(
     ordered_problem_ids: &[String],
     row_height: f32,
     viewport_height: f32,
-) {
+    now: f64,
+    duration_sec: f32,
+) -> bool {
     let board = &mut contest_state.leaderboard_pre_freeze;
     if board.is_empty() {
         tracing::error!("Board is empty!");
         unreachable!()
     }
 
+    if let Some(pending) = state.pending_solved_reveal.clone() {
+        let before_order: Vec<String> = board.iter().map(|team| team.team_id.clone()).collect();
+        if let Some(team) = board
+            .iter_mut()
+            .find(|team| team.team_id == pending.team_id)
+        {
+            let _ = apply_solved_problem_score(team, &pending.problem_id);
+        }
+
+        resort_leaderboard(board.as_mut_slice());
+        let after_order: Vec<String> = board.iter().map(|team| team.team_id.clone()).collect();
+        spawn_row_move_animations(state, &before_order, &after_order, now, duration_sec);
+        state.last_sorted_team_ids = after_order;
+        state.pending_solved_reveal = None;
+
+        let mut index = state.current_reveal_index.unwrap_or_default();
+        if index >= board.len() {
+            index = board.len().saturating_sub(1);
+        }
+        state.current_reveal_index = Some(index);
+        set_scroll_target_for_index(
+            state,
+            index,
+            row_height,
+            viewport_height,
+            board.len(),
+            now,
+            true,
+        );
+
+        if !board.iter().any(team_has_pending_freeze) {
+            state.current_reveal_index = None;
+        }
+
+        return true;
+    }
+
     if !board.iter().any(team_has_pending_freeze) {
         state.current_reveal_index = None;
+        state.pending_steps = 0;
         tracing::warn!("No more team to reveal");
-        return;
+        return false;
     }
 
     if state.current_reveal_index.is_none() {
         state.current_reveal_index = find_last_pending_index(board);
         if let Some(index) = state.current_reveal_index {
-            state.viewpoint_offset =
-                row_offset_for_index(index, row_height, viewport_height, board.len());
+            set_scroll_target_for_index(
+                state,
+                index,
+                row_height,
+                viewport_height,
+                board.len(),
+                now,
+                true,
+            );
         }
-        return;
+        return true;
     }
 
     let mut index = state.current_reveal_index.unwrap_or_default();
@@ -370,22 +661,36 @@ fn handle_space_step(
     }
 
     if let Some(problem_id) = find_next_pending_problem_id(&board[index], ordered_problem_ids) {
-        if let Some(team) = board.get_mut(index) {
-            let _ = apply_reveal_for_problem(team, &problem_id);
+        if let Some(team) = board.get_mut(index)
+            && let Some(is_solved) = reveal_problem_result(team, &problem_id)
+            && is_solved
+        {
+            state.pending_solved_reveal = Some(PendingSolvedReveal {
+                team_id: team.team_id.clone(),
+                problem_id: problem_id.clone(),
+            });
         }
-
-        resort_leaderboard(board.as_mut_slice());
         index = index.min(board.len().saturating_sub(1));
     } else {
         index = index.saturating_sub(1);
     }
 
     state.current_reveal_index = Some(index);
-    state.viewpoint_offset = row_offset_for_index(index, row_height, viewport_height, board.len());
+    set_scroll_target_for_index(
+        state,
+        index,
+        row_height,
+        viewport_height,
+        board.len(),
+        now,
+        true,
+    );
 
     if !board.iter().any(team_has_pending_freeze) {
         state.current_reveal_index = None;
     }
+
+    true
 }
 
 fn compute_frame_metrics(
@@ -591,6 +896,13 @@ fn render_center_zone(
             Some(s) if s.submissions_before_solved > 0 => attempted_bg,
             _ => untouched_bg,
         };
+        let cell_text = match stat {
+            Some(s) if s.submissions_before_solved > 0 => &format!(
+                "{} - {}",
+                s.submissions_before_solved, s.last_submission_time
+            ),
+            Some(_) | None => &problem.label,
+        };
         let status_rect = egui::Rect::from_min_size(
             egui::pos2(cell_x, status_y),
             egui::vec2(cell_width, cell_height),
@@ -599,7 +911,7 @@ fn render_center_zone(
         ui.painter().text(
             status_rect.center(),
             egui::Align2::CENTER_CENTER,
-            &problem.label,
+            cell_text,
             m.problem_font.clone(),
             egui::Color32::WHITE,
         );

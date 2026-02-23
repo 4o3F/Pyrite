@@ -232,7 +232,7 @@ pub struct Contest {
     pub scoreboard_freeze_time: Option<DateTime<FixedOffset>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ContestState {
     pub contest: Option<Contest>,
     pub judgement_types: HashMap<String, JudgementType>,
@@ -416,6 +416,7 @@ pub struct ProblemStat {
     pub penalty: i64,
     pub submissions_before_solved: i32,
     pub first_ac_time: Option<DateTime<FixedOffset>>,
+    pub last_submission_time: i64,
 }
 
 impl TeamStatus {
@@ -455,6 +456,7 @@ impl TeamStatus {
                     penalty: 0,
                     submissions_before_solved: 0,
                     first_ac_time: None,
+                    last_submission_time: 0,
                 });
 
         if problem_stat.solved {
@@ -466,15 +468,22 @@ impl TeamStatus {
         {
             if judgement_type.penalty || judgement_type.solved {
                 problem_stat.submissions_before_solved += 1;
-            }
 
-            problem_stat.attempted_during_freeze =
-                if let Some(contest_freeze_time) = contest_freeze_time {
-                    submission_time > contest_freeze_time
+                problem_stat.attempted_during_freeze =
+                    if let Some(contest_freeze_time) = contest_freeze_time {
+                        submission_time > contest_freeze_time
+                    } else {
+                        error!("No contest freeze time specified!");
+                        unreachable!()
+                    };
+
+                problem_stat.last_submission_time = if let Some(start_time) = contest_start_time {
+                    (submission_time - start_time).num_minutes()
                 } else {
-                    error!("No contest freeze time specified!");
-                    unreachable!()
+                    error!("No contest start time specified!");
+                    return;
                 };
+            }
 
             if judgement_type.solved {
                 problem_stat.solved = true;

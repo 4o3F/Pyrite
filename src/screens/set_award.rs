@@ -107,6 +107,7 @@ fn sync_group_selection(state: &mut SetAwardUiState, contest_state: &ContestStat
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn build_medal_preview(
     contest_state: &ContestState,
     finalized_leaderboard: &[TeamStatus],
@@ -114,10 +115,21 @@ fn build_medal_preview(
     gold_count: usize,
     silver_count: usize,
     bronze_count: usize,
-) -> (Vec<(String, String)>, Vec<(String, String)>, Vec<(String, String)>, usize) {
+) -> (
+    Vec<(String, String)>,
+    Vec<(String, String)>,
+    Vec<(String, String)>,
+    usize,
+) {
     let selected_groups: HashSet<&str> = selected_group_ids
         .iter()
-        .filter_map(|(group_id, selected)| if *selected { Some(group_id.as_str()) } else { None })
+        .filter_map(|(group_id, selected)| {
+            if *selected {
+                Some(group_id.as_str())
+            } else {
+                None
+            }
+        })
         .collect();
 
     let eligible: Vec<(String, String)> = finalized_leaderboard
@@ -223,8 +235,8 @@ fn load_awards_from_file(contest_state: &mut ContestState) -> Result<String, Str
     let raw = fs::read_to_string(&path)
         .map_err(|err| format!("Failed to read awards file {}: {err}", path.display()))?;
 
-    let parsed: std::collections::HashMap<String, Award> = serde_json::from_str(&raw)
-        .map_err(|err| format!("Failed to parse awards JSON: {err}"))?;
+    let parsed: std::collections::HashMap<String, Award> =
+        serde_json::from_str(&raw).map_err(|err| format!("Failed to parse awards JSON: {err}"))?;
 
     let mut normalized = std::collections::HashMap::with_capacity(parsed.len());
     for (_key, award) in parsed {
@@ -239,13 +251,35 @@ fn load_awards_from_file(contest_state: &mut ContestState) -> Result<String, Str
     ))
 }
 
+fn dump_contest_state_before_presentation(contest_state: &ContestState) -> Result<String, String> {
+    let dump_path = std::path::Path::new("logs").join("contest_state_before_present.json");
+    fs::create_dir_all("logs").map_err(|err| format!("Failed to create logs directory: {err}"))?;
+
+    let json = serde_json::to_string_pretty(contest_state)
+        .map_err(|err| format!("Failed to serialize contest state: {err}"))?;
+    fs::write(&dump_path, json).map_err(|err| {
+        format!(
+            "Failed to write contest state dump {}: {err}",
+            dump_path.display()
+        )
+    })?;
+
+    Ok(format!("Dumped contest state to {}", dump_path.display()))
+}
+
 fn apply_group_filter_for_presentation(
     contest_state: &mut ContestState,
     selected_group_ids: &BTreeMap<String, bool>,
 ) -> String {
     let selected_groups: HashSet<&str> = selected_group_ids
         .iter()
-        .filter_map(|(group_id, selected)| if *selected { Some(group_id.as_str()) } else { None })
+        .filter_map(|(group_id, selected)| {
+            if *selected {
+                Some(group_id.as_str())
+            } else {
+                None
+            }
+        })
         .collect();
 
     let allowed_team_ids: HashSet<String> = contest_state
@@ -273,7 +307,8 @@ fn apply_group_filter_for_presentation(
     contest_state
         .submissions
         .retain(|_, submission| allowed_team_ids.contains(&submission.team_id));
-    let allowed_submission_ids: HashSet<String> = contest_state.submissions.keys().cloned().collect();
+    let allowed_submission_ids: HashSet<String> =
+        contest_state.submissions.keys().cloned().collect();
     contest_state
         .judgements
         .retain(|_, judgement| allowed_submission_ids.contains(&judgement.submission_id));
@@ -624,10 +659,15 @@ pub fn ui(ui: &mut egui::Ui, contest_state: &mut ContestState) -> SetAwardAction
             ui.add_space(12.0);
 
             if ui.button("Present").clicked() {
-                state.message = Some(apply_group_filter_for_presentation(
+                let dump_message = match dump_contest_state_before_presentation(contest_state) {
+                    Ok(msg) => msg,
+                    Err(err) => format!("Contest state dump failed: {err}"),
+                };
+                let filter_message = apply_group_filter_for_presentation(
                     contest_state,
                     &state.selected_group_ids,
-                ));
+                );
+                state.message = Some(format!("{dump_message}; {filter_message}"));
                 state.computed_finalized_leaderboard = None;
                 state.finalized_cache_key.clear();
                 action = SetAwardAction::Continue;
