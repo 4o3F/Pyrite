@@ -15,6 +15,8 @@ pub enum PresentAction {
 struct PresentUiState {
     /// Scroll offset in points for the scoreboard viewport.
     viewpoint_offset: f32,
+    current_reveal_index: Option<usize>,
+    reveal_initialized: bool,
     logo_cache: HashMap<String, Option<egui::TextureHandle>>,
 }
 
@@ -58,7 +60,6 @@ pub fn ui(
 ) -> PresentAction {
     PRESENT_UI_STATE.with(|cell| {
         let mut state = cell.borrow_mut();
-        let row_count = contest_state.leaderboard_pre_freeze.len();
 
         let metrics = compute_frame_metrics(
             ui.painter(),
@@ -70,13 +71,17 @@ pub fn ui(
 
         let even_row_bg = egui::Color32::from_gray(32);
         let odd_row_bg = egui::Color32::from_gray(12);
+        let focused_row_bg = egui::Color32::from_rgb(116, 212, 255);
         let solved_bg = egui::Color32::from_rgb(49, 201, 80);
         let attempted_bg = egui::Color32::from_rgb(251, 44, 54);
         let attempted_freeze_bg = egui::Color32::from_rgb(43, 127, 255);
         let untouched_bg = egui::Color32::from_rgb(98, 116, 142);
 
-        let mut problems: Vec<_> = contest_state.problems.values().collect();
+        let mut problems: Vec<Problem> = contest_state.problems.values().cloned().collect();
         problems.sort_by(|a, b| a.ordinal.cmp(&b.ordinal).then(a.label.cmp(&b.label)));
+        let ordered_problem_ids: Vec<String> =
+            problems.iter().map(|problem| problem.id.clone()).collect();
+        let row_count = contest_state.leaderboard_pre_freeze.len();
 
         // Header row
         let (header_rect, _) = ui.allocate_exact_size(
@@ -129,6 +134,17 @@ pub fn ui(
         ui.add_space(4.0);
 
         let scroll_height = (ui.available_height()).max(80.0);
+        sync_reveal_focus_on_enter(&mut state, contest_state, &metrics, scroll_height);
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
+            handle_space_step(
+                &mut state,
+                contest_state,
+                &ordered_problem_ids,
+                metrics.row_height,
+                scroll_height,
+            );
+        }
+
         let content_height = row_count as f32 * metrics.row_height;
 
         egui::ScrollArea::vertical()
@@ -160,7 +176,9 @@ pub fn ui(
                     );
                     let layout = compute_row_layout(row_rect, &metrics);
 
-                    let bg = if idx % 2 == 0 {
+                    let bg = if state.current_reveal_index == Some(idx) {
+                        focused_row_bg
+                    } else if idx % 2 == 0 {
                         even_row_bg
                     } else {
                         odd_row_bg
@@ -224,6 +242,150 @@ pub fn ui(
     });
 
     PresentAction::Stay
+}
+
+fn team_has_pending_freeze(team: &TeamStatus) -> bool {
+    team.problem_stats
+        .values()
+        .any(|stat| stat.attempted_during_freeze)
+}
+
+fn find_last_pending_index(board: &[TeamStatus]) -> Option<usize> {
+    board.iter().rposition(team_has_pending_freeze)
+}
+
+fn find_next_pending_problem_id(
+    team: &TeamStatus,
+    ordered_problem_ids: &[String],
+) -> Option<String> {
+    for problem_id in ordered_problem_ids {
+        if team
+            .problem_stats
+            .get(problem_id)
+            .is_some_and(|stat| stat.attempted_during_freeze)
+        {
+            return Some(problem_id.clone());
+        }
+    }
+
+    team.problem_stats
+        .iter()
+        .find(|(_, stat)| stat.attempted_during_freeze)
+        .map(|(problem_id, _)| problem_id.clone())
+}
+
+fn apply_reveal_for_problem(team: &mut TeamStatus, problem_id: &str) -> bool {
+    let Some(problem_stat) = team.problem_stats.get_mut(problem_id) else {
+        return false;
+    };
+    if !problem_stat.attempted_during_freeze {
+        return false;
+    }
+
+    problem_stat.attempted_during_freeze = false;
+    if !problem_stat.solved {
+        return false;
+    }
+
+    team.total_points += 1;
+    team.total_penalty += problem_stat.penalty;
+    if let Some(ac_time) = problem_stat.first_ac_time
+        && team
+            .last_ac_time
+            .is_none_or(|last_time| ac_time > last_time)
+    {
+        team.last_ac_time = Some(ac_time);
+    }
+
+    true
+}
+
+fn resort_leaderboard(board: &mut [TeamStatus]) {
+    board.sort();
+}
+
+fn row_offset_for_index(
+    index: usize,
+    row_height: f32,
+    viewport_height: f32,
+    row_count: usize,
+) -> f32 {
+    let target = index as f32 * row_height - viewport_height * (2.0 / 3.0);
+    let max_offset = (row_count as f32 * row_height - viewport_height).max(0.0);
+    target.clamp(0.0, max_offset)
+}
+
+fn sync_reveal_focus_on_enter(
+    state: &mut PresentUiState,
+    contest_state: &ContestState,
+    metrics: &FrameMetrics,
+    viewport_height: f32,
+) {
+    let board = &contest_state.leaderboard_pre_freeze;
+    if !state.reveal_initialized
+        || state
+            .current_reveal_index
+            .is_some_and(|index| index >= board.len())
+    {
+        state.current_reveal_index = find_last_pending_index(board);
+        state.reveal_initialized = true;
+        if let Some(index) = state.current_reveal_index {
+            state.viewpoint_offset =
+                row_offset_for_index(index, metrics.row_height, viewport_height, board.len());
+        }
+    }
+}
+
+fn handle_space_step(
+    state: &mut PresentUiState,
+    contest_state: &mut ContestState,
+    ordered_problem_ids: &[String],
+    row_height: f32,
+    viewport_height: f32,
+) {
+    let board = &mut contest_state.leaderboard_pre_freeze;
+    if board.is_empty() {
+        tracing::error!("Board is empty!");
+        unreachable!()
+    }
+
+    if !board.iter().any(team_has_pending_freeze) {
+        state.current_reveal_index = None;
+        tracing::warn!("No more team to reveal");
+        return;
+    }
+
+    if state.current_reveal_index.is_none() {
+        state.current_reveal_index = find_last_pending_index(board);
+        if let Some(index) = state.current_reveal_index {
+            state.viewpoint_offset =
+                row_offset_for_index(index, row_height, viewport_height, board.len());
+        }
+        return;
+    }
+
+    let mut index = state.current_reveal_index.unwrap_or_default();
+    if index >= board.len() {
+        index = board.len().saturating_sub(1);
+    }
+
+    if let Some(problem_id) = find_next_pending_problem_id(&board[index], ordered_problem_ids) {
+        if let Some(team) = board.get_mut(index) {
+            let _ = apply_reveal_for_problem(team, &problem_id);
+        }
+
+        resort_leaderboard(board.as_mut_slice());
+        index = index.min(board.len().saturating_sub(1));
+    } else {
+        index = index.saturating_sub(1);
+    }
+
+    state.current_reveal_index = Some(index);
+    state.viewpoint_offset = row_offset_for_index(index, row_height, viewport_height, board.len());
+
+    if !board.iter().any(team_has_pending_freeze) {
+        state.current_reveal_index = None;
+    }
 }
 
 fn compute_frame_metrics(
@@ -384,7 +546,7 @@ fn render_left_zone(
 fn render_center_zone(
     ui: &mut egui::Ui,
     team: &TeamStatus,
-    problems: &[&Problem],
+    problems: &[Problem],
     layout: &RowLayout,
     m: &FrameMetrics,
     solved_bg: egui::Color32,
