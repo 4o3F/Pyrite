@@ -1,11 +1,16 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
 
 use eframe::egui;
+use image::GenericImageView;
+use tracing::{debug, info, warn};
 
 use crate::models::{ContestState, Problem, TeamStatus};
 use crate::services::config_loader::PyriteConfig;
+use crate::services::present_flow::{self, PresentFlowState};
 
 pub enum PresentAction {
     Stay,
@@ -18,19 +23,31 @@ struct PresentUiState {
     scroll_anim_start_offset: f32,
     scroll_anim_start_time: Option<f64>,
     scroll_anim_duration: f32,
-    current_reveal_index: Option<usize>,
-    reveal_initialized: bool,
-    pending_steps: usize,
-    pending_solved_reveal: Option<PendingSolvedReveal>,
-    last_sorted_team_ids: Vec<String>,
+    flow: PresentFlowState,
     active_row_anims: HashMap<String, RowMoveAnim>,
     logo_cache: HashMap<String, Option<egui::TextureHandle>>,
+    award_photo_cache: HashMap<String, Option<egui::TextureHandle>>,
+    award_fallback_texture: Option<Option<egui::TextureHandle>>,
+    awards_initialized: bool,
+    awards_by_team: HashMap<String, Vec<String>>,
+    award_decode_started: bool,
+    award_decode_rx: Option<Receiver<AwardDecodeMsg>>,
+    decoded_award_images: HashMap<String, Option<DecodedImageData>>,
+    decoded_award_fallback: Option<Option<DecodedImageData>>,
 }
 
-#[derive(Clone)]
-struct PendingSolvedReveal {
-    team_id: String,
-    problem_id: String,
+struct DecodedImageData {
+    width: usize,
+    height: usize,
+    rgba: Vec<u8>,
+}
+
+enum AwardDecodeMsg {
+    Team {
+        team_id: String,
+        image: Option<DecodedImageData>,
+    },
+    Fallback(Option<DecodedImageData>),
 }
 
 #[derive(Clone, Copy)]
@@ -107,6 +124,9 @@ pub fn ui(
         let ordered_problem_ids: Vec<String> =
             problems.iter().map(|problem| problem.id.clone()).collect();
         let row_count = contest_state.leaderboard_pre_freeze.len();
+        ensure_awards_initialized(&mut state, contest_state);
+        maybe_start_award_predecode(&mut state, contest_state, data_path, config);
+        pump_award_predecode(&mut state);
 
         // Header row
         let (header_rect, _) = ui.allocate_exact_size(
@@ -159,31 +179,48 @@ pub fn ui(
         ui.add_space(4.0);
 
         let scroll_height = (ui.available_height()).max(80.0);
-        sync_reveal_focus_on_enter(
-            &mut state,
-            contest_state,
-            &metrics,
-            scroll_height,
-            now,
-            scroll_duration,
-        );
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
-            state.pending_steps = state.pending_steps.saturating_add(1);
-        }
-        while state.pending_steps > 0 {
-            let progressed = handle_space_step(
+        if let Some(index) = present_flow::sync_reveal_focus_on_enter(
+            &mut state.flow,
+            &contest_state.leaderboard_pre_freeze,
+        ) {
+            set_scroll_target_for_index(
                 &mut state,
-                contest_state,
-                &ordered_problem_ids,
+                index,
                 metrics.row_height,
                 scroll_height,
+                row_count,
                 now,
-                row_fly_seconds_per_row,
+                false,
             );
-            state.pending_steps = state.pending_steps.saturating_sub(1);
-            if !progressed {
-                state.pending_steps = 0;
-                break;
+        }
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
+            let mut awards_by_team = std::mem::take(&mut state.awards_by_team);
+            let outcome = present_flow::advance_space_phase(
+                &mut state.flow,
+                &mut contest_state.leaderboard_pre_freeze,
+                &ordered_problem_ids,
+                &mut awards_by_team,
+            );
+            state.awards_by_team = awards_by_team;
+            if let Some((before_order, after_order)) = outcome.row_reorder {
+                spawn_row_move_animations(
+                    &mut state,
+                    &before_order,
+                    &after_order,
+                    now,
+                    row_fly_seconds_per_row,
+                );
+            }
+            if let Some(index) = outcome.scroll_index {
+                set_scroll_target_for_index(
+                    &mut state,
+                    index,
+                    metrics.row_height,
+                    scroll_height,
+                    contest_state.leaderboard_pre_freeze.len(),
+                    now,
+                    true,
+                );
             }
         }
         let scroll_animating = update_scroll_animation(&mut state, now);
@@ -235,7 +272,7 @@ pub fn ui(
                     );
                     let layout = compute_row_layout(row_rect, &metrics);
 
-                    let bg = if state.current_reveal_index == Some(idx) {
+                    let bg = if state.flow.current_reveal_index == Some(idx) {
                         focused_row_bg
                     } else if idx % 2 == 0 {
                         even_row_bg
@@ -282,7 +319,7 @@ pub fn ui(
                     );
                     let layout = compute_row_layout(row_rect, &metrics);
 
-                    let bg = if state.current_reveal_index == Some(idx) {
+                    let bg = if state.flow.current_reveal_index == Some(idx) {
                         focused_row_bg
                     } else if idx % 2 == 0 {
                         even_row_bg
@@ -318,7 +355,12 @@ pub fn ui(
                 }
             });
 
-        if scroll_animating || row_animating {
+        render_active_award_overlay(ui, &mut state, ctx, contest_state, data_path, config);
+
+        if scroll_animating
+            || row_animating
+            || present_flow::current_award_payload(&state.flow.space_phase).is_some()
+        {
             ctx.request_repaint();
         }
     });
@@ -350,69 +392,136 @@ fn lerp_f32(from: f32, to: f32, t: f32) -> f32 {
     from + (to - from) * t
 }
 
-fn team_has_pending_freeze(team: &TeamStatus) -> bool {
-    team.problem_stats
-        .values()
-        .any(|stat| stat.attempted_during_freeze)
-}
+fn ensure_awards_initialized(state: &mut PresentUiState, contest_state: &ContestState) {
+    if state.awards_initialized {
+        return;
+    }
 
-fn find_last_pending_index(board: &[TeamStatus]) -> Option<usize> {
-    board.iter().rposition(team_has_pending_freeze)
-}
-
-fn find_next_pending_problem_id(
-    team: &TeamStatus,
-    ordered_problem_ids: &[String],
-) -> Option<String> {
-    for problem_id in ordered_problem_ids {
-        if team
-            .problem_stats
-            .get(problem_id)
-            .is_some_and(|stat| stat.attempted_during_freeze)
-        {
-            return Some(problem_id.clone());
+    let mut awards: Vec<_> = contest_state.awards.values().collect();
+    awards.sort_by(|a, b| a.id.cmp(&b.id));
+    for award in awards {
+        let citation = award.citation.trim();
+        if citation.is_empty() {
+            continue;
+        }
+        for team_id in &award.team_ids {
+            state
+                .awards_by_team
+                .entry(team_id.clone())
+                .or_default()
+                .push(citation.to_string());
         }
     }
-
-    team.problem_stats
-        .iter()
-        .find(|(_, stat)| stat.attempted_during_freeze)
-        .map(|(problem_id, _)| problem_id.clone())
+    state.awards_initialized = true;
 }
 
-fn reveal_problem_result(team: &mut TeamStatus, problem_id: &str) -> Option<bool> {
-    let problem_stat = team.problem_stats.get_mut(problem_id)?;
-    if !problem_stat.attempted_during_freeze {
-        return None;
+fn maybe_start_award_predecode(
+    state: &mut PresentUiState,
+    contest_state: &ContestState,
+    data_path: Option<&str>,
+    config: &PyriteConfig,
+) {
+    if state.award_decode_started {
+        return;
     }
+    state.award_decode_started = true;
 
-    problem_stat.attempted_during_freeze = false;
-    Some(problem_stat.solved)
-}
-
-fn apply_solved_problem_score(team: &mut TeamStatus, problem_id: &str) -> bool {
-    let Some(problem_stat) = team.problem_stats.get(problem_id) else {
-        return false;
+    let Some(base_path) = data_path.map(PathBuf::from) else {
+        warn!("Award predecode skipped: data_path is missing");
+        return;
     };
-    if !problem_stat.solved {
-        return false;
+    let ext = config
+        .presentation
+        .team_photo_extension
+        .trim()
+        .trim_start_matches('.')
+        .to_string();
+    if ext.is_empty() {
+        warn!("Award predecode skipped: team_photo_extension is empty");
+        return;
     }
 
-    team.total_points += 1;
-    team.total_penalty += problem_stat.penalty;
-    if let Some(ac_time) = problem_stat.first_ac_time
-        && team
-            .last_ac_time
-            .is_none_or(|last_time| ac_time > last_time)
-    {
-        team.last_ac_time = Some(ac_time);
-    }
+    let fallback_path = resolve_award_fallback_path(config);
+    let mut team_ids: Vec<String> = state.awards_by_team.keys().cloned().collect();
+    team_ids.sort_by(|a, b| {
+        contest_state
+            .leaderboard_finalized
+            .binary_search_by(|x| x.team_id.cmp(a))
+            .cmp(
+                &contest_state
+                    .leaderboard_finalized
+                    .binary_search_by(|x| x.team_id.cmp(b)),
+            )
+    });
+    team_ids.reverse();
+    info!(
+        "Starting award image predecode for {} team(s), ext={}, fallback={}",
+        team_ids.len(),
+        ext,
+        fallback_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<none>".to_string())
+    );
+    let (tx, rx) = mpsc::channel::<AwardDecodeMsg>();
+    state.award_decode_rx = Some(rx);
 
-    true
+    thread::spawn(move || {
+        let mut ok_count = 0usize;
+        let mut miss_count = 0usize;
+        let fallback_image = fallback_path
+            .as_deref()
+            .and_then(|path| decode_award_image_data(path, 1920));
+        if fallback_image.is_some() {
+            info!("Award fallback image decoded successfully");
+        } else {
+            debug!("Award fallback image not available or decode failed");
+        }
+        let _ = tx.send(AwardDecodeMsg::Fallback(fallback_image));
+
+        for team_id in team_ids {
+            let path = base_path.join("teams").join(format!("{team_id}.{ext}"));
+            let image = if path.exists() && path.is_file() {
+                decode_award_image_data(&path, 1920)
+            } else {
+                None
+            };
+            if image.is_some() {
+                ok_count += 1;
+                info!("Award image for team {} predecode finished", team_id);
+            } else {
+                miss_count += 1;
+            }
+            let _ = tx.send(AwardDecodeMsg::Team { team_id, image });
+        }
+        info!(
+            "Award image predecode finished: ok={}, missing_or_failed={}",
+            ok_count, miss_count
+        );
+    });
 }
 
-fn resort_leaderboard(board: &mut [TeamStatus]) {
-    board.sort();
+fn pump_award_predecode(state: &mut PresentUiState) {
+    let Some(rx) = state.award_decode_rx.as_ref() else {
+        return;
+    };
+
+    loop {
+        match rx.try_recv() {
+            Ok(AwardDecodeMsg::Team { team_id, image }) => {
+                state.decoded_award_images.insert(team_id, image);
+            }
+            Ok(AwardDecodeMsg::Fallback(image)) => {
+                state.decoded_award_fallback = Some(image);
+            }
+            Err(TryRecvError::Empty) => break,
+            Err(TryRecvError::Disconnected) => {
+                info!("Award image predecode channel closed");
+                state.award_decode_rx = None;
+                break;
+            }
+        }
+    }
 }
 
 fn row_offset_for_index(
@@ -541,156 +650,6 @@ fn cleanup_and_has_active_row_anims(state: &mut PresentUiState, now: f64) -> boo
         .active_row_anims
         .retain(|_, anim| anim_progress(now, anim.started_at, anim.duration_sec) < 1.0);
     !state.active_row_anims.is_empty()
-}
-
-fn sync_reveal_focus_on_enter(
-    state: &mut PresentUiState,
-    contest_state: &ContestState,
-    metrics: &FrameMetrics,
-    viewport_height: f32,
-    now: f64,
-    duration_sec: f32,
-) {
-    let board = &contest_state.leaderboard_pre_freeze;
-    if state.last_sorted_team_ids.is_empty() {
-        state.last_sorted_team_ids = board.iter().map(|team| team.team_id.clone()).collect();
-    }
-    if state.scroll_anim_duration <= 0.0 {
-        state.scroll_anim_duration = duration_sec;
-    }
-
-    if !state.reveal_initialized
-        || state
-            .current_reveal_index
-            .is_some_and(|index| index >= board.len())
-    {
-        state.current_reveal_index = find_last_pending_index(board);
-        state.reveal_initialized = true;
-        if let Some(index) = state.current_reveal_index {
-            set_scroll_target_for_index(
-                state,
-                index,
-                metrics.row_height,
-                viewport_height,
-                board.len(),
-                now,
-                false,
-            );
-        }
-    }
-}
-
-fn handle_space_step(
-    state: &mut PresentUiState,
-    contest_state: &mut ContestState,
-    ordered_problem_ids: &[String],
-    row_height: f32,
-    viewport_height: f32,
-    now: f64,
-    duration_sec: f32,
-) -> bool {
-    let board = &mut contest_state.leaderboard_pre_freeze;
-    if board.is_empty() {
-        tracing::error!("Board is empty!");
-        unreachable!()
-    }
-
-    if let Some(pending) = state.pending_solved_reveal.clone() {
-        let before_order: Vec<String> = board.iter().map(|team| team.team_id.clone()).collect();
-        if let Some(team) = board
-            .iter_mut()
-            .find(|team| team.team_id == pending.team_id)
-        {
-            let _ = apply_solved_problem_score(team, &pending.problem_id);
-        }
-
-        resort_leaderboard(board.as_mut_slice());
-        let after_order: Vec<String> = board.iter().map(|team| team.team_id.clone()).collect();
-        spawn_row_move_animations(state, &before_order, &after_order, now, duration_sec);
-        state.last_sorted_team_ids = after_order;
-        state.pending_solved_reveal = None;
-
-        let mut index = state.current_reveal_index.unwrap_or_default();
-        if index >= board.len() {
-            index = board.len().saturating_sub(1);
-        }
-        state.current_reveal_index = Some(index);
-        set_scroll_target_for_index(
-            state,
-            index,
-            row_height,
-            viewport_height,
-            board.len(),
-            now,
-            true,
-        );
-
-        if !board.iter().any(team_has_pending_freeze) {
-            state.current_reveal_index = None;
-        }
-
-        return true;
-    }
-
-    if !board.iter().any(team_has_pending_freeze) {
-        state.current_reveal_index = None;
-        state.pending_steps = 0;
-        tracing::warn!("No more team to reveal");
-        return false;
-    }
-
-    if state.current_reveal_index.is_none() {
-        state.current_reveal_index = find_last_pending_index(board);
-        if let Some(index) = state.current_reveal_index {
-            set_scroll_target_for_index(
-                state,
-                index,
-                row_height,
-                viewport_height,
-                board.len(),
-                now,
-                true,
-            );
-        }
-        return true;
-    }
-
-    let mut index = state.current_reveal_index.unwrap_or_default();
-    if index >= board.len() {
-        index = board.len().saturating_sub(1);
-    }
-
-    if let Some(problem_id) = find_next_pending_problem_id(&board[index], ordered_problem_ids) {
-        if let Some(team) = board.get_mut(index)
-            && let Some(is_solved) = reveal_problem_result(team, &problem_id)
-            && is_solved
-        {
-            state.pending_solved_reveal = Some(PendingSolvedReveal {
-                team_id: team.team_id.clone(),
-                problem_id: problem_id.clone(),
-            });
-        }
-        index = index.min(board.len().saturating_sub(1));
-    } else {
-        index = index.saturating_sub(1);
-    }
-
-    state.current_reveal_index = Some(index);
-    set_scroll_target_for_index(
-        state,
-        index,
-        row_height,
-        viewport_height,
-        board.len(),
-        now,
-        true,
-    );
-
-    if !board.iter().any(team_has_pending_freeze) {
-        state.current_reveal_index = None;
-    }
-
-    true
 }
 
 fn compute_frame_metrics(
@@ -943,6 +902,106 @@ fn text_width(painter: &egui::Painter, text: &str, font: &egui::FontId) -> f32 {
         .x
 }
 
+fn render_active_award_overlay(
+    ui: &mut egui::Ui,
+    state: &mut PresentUiState,
+    ctx: &egui::Context,
+    contest_state: &ContestState,
+    data_path: Option<&str>,
+    config: &PyriteConfig,
+) {
+    let Some((team_id, citations)) = present_flow::current_award_payload(&state.flow.space_phase)
+    else {
+        return;
+    };
+    let team_id = team_id.to_string();
+    let citations = citations.to_vec();
+
+    let full_rect = ui.max_rect();
+    if let Some(texture) = ensure_award_photo_loaded(state, ctx, &team_id, data_path, config) {
+        let tex_size = texture.size_vec2();
+        if tex_size.x > 0.0 && tex_size.y > 0.0 {
+            let target_aspect = full_rect.width() / full_rect.height().max(1.0);
+            let image_aspect = tex_size.x / tex_size.y;
+            let uv = if image_aspect > target_aspect {
+                let visible_w = target_aspect / image_aspect;
+                let u0 = (1.0 - visible_w) * 0.5;
+                egui::Rect::from_min_max(egui::pos2(u0, 0.0), egui::pos2(u0 + visible_w, 1.0))
+            } else {
+                let visible_h = image_aspect / target_aspect.max(0.0001);
+                let v0 = (1.0 - visible_h) * 0.5;
+                egui::Rect::from_min_max(egui::pos2(0.0, v0), egui::pos2(1.0, v0 + visible_h))
+            };
+            ui.painter()
+                .image(texture.id(), full_rect, uv, egui::Color32::WHITE);
+        } else {
+            ui.painter()
+                .rect_filled(full_rect, 0.0, egui::Color32::from_gray(10));
+        }
+    } else {
+        ui.painter()
+            .rect_filled(full_rect, 0.0, egui::Color32::from_gray(10));
+    }
+
+    let bar_height = (full_rect.height() * 0.18).clamp(100.0, 220.0);
+    let bar_rect = egui::Rect::from_min_max(
+        egui::pos2(full_rect.left(), full_rect.bottom() - bar_height),
+        egui::pos2(full_rect.right(), full_rect.bottom()),
+    );
+    ui.painter()
+        .rect_filled(bar_rect, 0.0, egui::Color32::from_black_alpha(178));
+
+    let team_name = contest_state
+        .teams
+        .get(&team_id)
+        .map(|team| team.name.clone())
+        .unwrap_or_else(|| team_id.clone());
+    let award_text = citations.join(" | ");
+    let team_font = egui::FontId::proportional((bar_height * 0.3).clamp(28.0, 64.0));
+    let award_font = egui::FontId::proportional((bar_height * 0.22).clamp(22.0, 52.0));
+    let content_left_pad = bar_rect.width() * 0.03;
+    let logo_size = (bar_rect.height() * 0.62).clamp(56.0, 140.0);
+    let logo_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            bar_rect.left() + content_left_pad + logo_size * 0.5,
+            bar_rect.center().y,
+        ),
+        egui::vec2(logo_size, logo_size),
+    );
+    let text_gap = bar_rect.width() * 0.02;
+    let text_left = logo_rect.right() + text_gap;
+
+    if let Some(texture) =
+        ensure_logo_loaded(state, ctx, contest_state, &team_id, data_path, config)
+    {
+        let image = egui::Image::new(&texture)
+            .fit_to_exact_size(logo_rect.size())
+            .corner_radius(egui::CornerRadius::same((logo_rect.height() * 0.5) as u8));
+        ui.put(logo_rect, image);
+    } else {
+        ui.painter().circle_filled(
+            logo_rect.center(),
+            logo_rect.height() * 0.5,
+            egui::Color32::from_gray(72),
+        );
+    }
+
+    ui.painter().text(
+        egui::pos2(text_left, bar_rect.top() + bar_rect.height() * 0.33),
+        egui::Align2::LEFT_CENTER,
+        team_name,
+        team_font,
+        egui::Color32::WHITE,
+    );
+    ui.painter().text(
+        egui::pos2(text_left, bar_rect.top() + bar_rect.height() * 0.73),
+        egui::Align2::LEFT_CENTER,
+        award_text,
+        award_font,
+        egui::Color32::WHITE,
+    );
+}
+
 fn ensure_logo_loaded(
     state: &mut PresentUiState,
     ctx: &egui::Context,
@@ -958,6 +1017,55 @@ fn ensure_logo_loaded(
     let loaded = resolve_team_logo_path(contest_state, team_id, data_path, config)
         .and_then(|path| load_logo_texture(ctx, team_id, &path));
     state.logo_cache.insert(team_id.to_string(), loaded.clone());
+    loaded
+}
+
+fn ensure_award_photo_loaded(
+    state: &mut PresentUiState,
+    ctx: &egui::Context,
+    team_id: &str,
+    data_path: Option<&str>,
+    config: &PyriteConfig,
+) -> Option<egui::TextureHandle> {
+    if let Some(cached) = state.award_photo_cache.get(team_id) {
+        return cached.clone();
+    }
+
+    let loaded = state
+        .decoded_award_images
+        .get(team_id)
+        .and_then(|image| {
+            image.as_ref().and_then(|img| {
+                load_texture_from_decoded(ctx, &format!("team_award_{team_id}"), img)
+            })
+        })
+        .or_else(|| {
+            resolve_team_award_photo_path(team_id, data_path, config)
+                .and_then(|path| decode_award_image_data(&path, 1920))
+                .and_then(|img| {
+                    load_texture_from_decoded(ctx, &format!("team_award_{team_id}"), &img)
+                })
+        })
+        .or_else(|| ensure_award_fallback_texture_loaded(state, ctx));
+    state
+        .award_photo_cache
+        .insert(team_id.to_string(), loaded.clone());
+    loaded
+}
+
+fn ensure_award_fallback_texture_loaded(
+    state: &mut PresentUiState,
+    ctx: &egui::Context,
+) -> Option<egui::TextureHandle> {
+    if let Some(cached) = &state.award_fallback_texture {
+        return cached.clone();
+    }
+    let loaded = state
+        .decoded_award_fallback
+        .as_ref()
+        .and_then(|image| image.as_ref())
+        .and_then(|img| load_texture_from_decoded(ctx, "team_award_fallback", img));
+    state.award_fallback_texture = Some(loaded.clone());
     loaded
 }
 
@@ -992,9 +1100,56 @@ fn resolve_team_logo_path(
     }
 }
 
+fn resolve_award_fallback_path(config: &PyriteConfig) -> Option<PathBuf> {
+    let raw_path = config
+        .presentation
+        .team_photo_fallback_path
+        .as_ref()?
+        .trim();
+    if raw_path.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(raw_path);
+    if path.exists() && path.is_file() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+fn resolve_team_award_photo_path(
+    team_id: &str,
+    data_path: Option<&str>,
+    config: &PyriteConfig,
+) -> Option<PathBuf> {
+    let base = PathBuf::from(data_path?);
+    let ext = config
+        .presentation
+        .team_photo_extension
+        .trim()
+        .trim_start_matches('.');
+    if ext.is_empty() {
+        return None;
+    }
+    let file_path = base.join("teams").join(format!("{team_id}.{ext}"));
+    if file_path.exists() && file_path.is_file() {
+        Some(file_path)
+    } else {
+        None
+    }
+}
+
 fn load_logo_texture(
     ctx: &egui::Context,
     team_id: &str,
+    path: &Path,
+) -> Option<egui::TextureHandle> {
+    load_image_texture(ctx, &format!("team_logo_{team_id}"), path)
+}
+
+fn load_image_texture(
+    ctx: &egui::Context,
+    texture_id: &str,
     path: &Path,
 ) -> Option<egui::TextureHandle> {
     let bytes = std::fs::read(path).ok()?;
@@ -1002,9 +1157,39 @@ fn load_logo_texture(
     let rgba = decoded.to_rgba8();
     let size = [rgba.width() as usize, rgba.height() as usize];
     let image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    Some(ctx.load_texture(texture_id.to_string(), image, egui::TextureOptions::LINEAR))
+}
+
+fn decode_award_image_data(path: &Path, max_dimension: u32) -> Option<DecodedImageData> {
+    let bytes = std::fs::read(path).ok()?;
+    let mut decoded = image::load_from_memory(&bytes).ok()?;
+    let (width, height) = decoded.dimensions();
+    let max_side = width.max(height);
+    if max_side > max_dimension {
+        decoded = decoded.resize(
+            max_dimension,
+            max_dimension,
+            image::imageops::FilterType::Triangle,
+        );
+    }
+    let rgba = decoded.to_rgba8();
+    Some(DecodedImageData {
+        width: rgba.width() as usize,
+        height: rgba.height() as usize,
+        rgba: rgba.into_raw(),
+    })
+}
+
+fn load_texture_from_decoded(
+    ctx: &egui::Context,
+    texture_id: &str,
+    image: &DecodedImageData,
+) -> Option<egui::TextureHandle> {
+    let color_image =
+        egui::ColorImage::from_rgba_unmultiplied([image.width, image.height], &image.rgba);
     Some(ctx.load_texture(
-        format!("team_logo_{team_id}"),
-        image,
+        texture_id.to_string(),
+        color_image,
         egui::TextureOptions::LINEAR,
     ))
 }

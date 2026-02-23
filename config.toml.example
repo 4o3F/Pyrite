@@ -6,3 +6,5 @@ rows_per_page = 12
 scroll_animation_seconds = 0.35
 row_fly_animation_seconds = 0.45
 logo_extension = "png"
+team_photo_extension = "jpg"
+team_photo_fallback_path = ""

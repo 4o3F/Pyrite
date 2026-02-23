@@ -17,6 +17,10 @@ pub struct PresentationConfig {
     pub row_fly_animation_seconds: f32,
     #[serde(default = "default_logo_extension")]
     pub logo_extension: String,
+    #[serde(default = "default_team_photo_extension")]
+    pub team_photo_extension: String,
+    #[serde(default)]
+    pub team_photo_fallback_path: Option<String>,
 }
 
 impl Default for PresentationConfig {
@@ -26,6 +30,8 @@ impl Default for PresentationConfig {
             scroll_animation_seconds: default_scroll_animation_seconds(),
             row_fly_animation_seconds: default_row_fly_animation_seconds(),
             logo_extension: default_logo_extension(),
+            team_photo_extension: default_team_photo_extension(),
+            team_photo_fallback_path: None,
         }
     }
 }
@@ -57,6 +63,10 @@ fn default_row_fly_animation_seconds() -> f32 {
 }
 
 fn default_logo_extension() -> String {
+    "jpg".to_string()
+}
+
+fn default_team_photo_extension() -> String {
     "jpg".to_string()
 }
 

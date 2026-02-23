@@ -103,7 +103,7 @@ impl eframe::App for PyriteApp {
 }
 
 fn init_tracing() -> Option<WorkerGuard> {
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug"));
     let console_layer = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stdout)
         .with_target(true);
