@@ -1,9 +1,10 @@
 use crate::models;
 use crate::services::config_loader::{self, PyriteConfig};
 use crate::services::event_parser::{ParserEvent, spawn_event_feed_parser};
+use crate::services::image_cache::{self, ImageCacheEvent};
 use eframe::egui;
 use rfd::FileDialog;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{Mutex, OnceLock};
 
@@ -14,8 +15,10 @@ pub enum LoadDataAction {
 
 #[derive(Default)]
 struct ParseUiState {
-    receiver: Option<Receiver<ParserEvent>>,
+    parser_receiver: Option<Receiver<ParserEvent>>,
+    cache_receiver: Option<Receiver<ImageCacheEvent>>,
     is_parsing: bool,
+    is_caching_award_images: bool,
     parsed_successfully: bool,
     parsed_path: Option<String>,
     lines_read: u64,
@@ -24,6 +27,11 @@ struct ParseUiState {
     errors: Vec<String>,
     warnings: Vec<String>,
     warnings_acknowledged: bool,
+    cache_total: usize,
+    cache_completed: usize,
+    cache_ok: usize,
+    cache_miss: usize,
+    cache_failed_message: Option<String>,
     parsed_contest_state: Option<models::ContestState>,
     parsed_config: Option<PyriteConfig>,
 }
@@ -135,7 +143,14 @@ pub fn ui(ui: &mut egui::Ui, data_path: &mut Option<String>) -> LoadDataAction {
         state.errors.clear();
         state.warnings.clear();
         state.warnings_acknowledged = false;
-        state.receiver = None;
+        state.parser_receiver = None;
+        state.cache_receiver = None;
+        state.is_caching_award_images = false;
+        state.cache_total = 0;
+        state.cache_completed = 0;
+        state.cache_ok = 0;
+        state.cache_miss = 0;
+        state.cache_failed_message = None;
         state.parsed_contest_state = None;
         state.parsed_config = None;
     }
@@ -143,7 +158,7 @@ pub fn ui(ui: &mut egui::Ui, data_path: &mut Option<String>) -> LoadDataAction {
     if state.is_parsing {
         loop {
             let event = {
-                let Some(rx) = &state.receiver else {
+                let Some(rx) = &state.parser_receiver else {
                     break;
                 };
                 rx.try_recv()
@@ -159,6 +174,13 @@ pub fn ui(ui: &mut egui::Ui, data_path: &mut Option<String>) -> LoadDataAction {
                     state.errors.clear();
                     state.warnings.clear();
                     state.warnings_acknowledged = false;
+                    state.cache_receiver = None;
+                    state.is_caching_award_images = false;
+                    state.cache_total = 0;
+                    state.cache_completed = 0;
+                    state.cache_ok = 0;
+                    state.cache_miss = 0;
+                    state.cache_failed_message = None;
                     state.parsed_contest_state = None;
                 }
                 Ok(ParserEvent::Progress { lines_read }) => {
@@ -189,13 +211,27 @@ pub fn ui(ui: &mut egui::Ui, data_path: &mut Option<String>) -> LoadDataAction {
                         state.parsed_config = None;
                         state.warnings.clear();
                         state.warnings_acknowledged = false;
+                        state.cache_receiver = None;
+                        state.is_caching_award_images = false;
+                        state.cache_total = 0;
+                        state.cache_completed = 0;
+                        state.cache_ok = 0;
+                        state.cache_miss = 0;
+                        state.cache_failed_message = None;
                     } else {
                         state.parse_failed_message = None;
                         state.parsed_contest_state = Some(*contest_state);
                         state.warnings = warnings;
                         state.warnings_acknowledged = false;
+                        state.cache_receiver = None;
+                        state.is_caching_award_images = false;
+                        state.cache_total = 0;
+                        state.cache_completed = 0;
+                        state.cache_ok = 0;
+                        state.cache_miss = 0;
+                        state.cache_failed_message = None;
                     }
-                    state.receiver = None;
+                    state.parser_receiver = None;
                     break;
                 }
                 Ok(ParserEvent::Failed { message }) => {
@@ -205,12 +241,19 @@ pub fn ui(ui: &mut egui::Ui, data_path: &mut Option<String>) -> LoadDataAction {
                     state.errors.push(message);
                     state.warnings.clear();
                     state.warnings_acknowledged = false;
+                    state.cache_receiver = None;
+                    state.is_caching_award_images = false;
+                    state.cache_total = 0;
+                    state.cache_completed = 0;
+                    state.cache_ok = 0;
+                    state.cache_miss = 0;
+                    state.cache_failed_message = None;
                     state.parsed_contest_state = None;
                     state.parsed_config = None;
                     if state.errors.len() > 8 {
                         state.errors.remove(0);
                     }
-                    state.receiver = None;
+                    state.parser_receiver = None;
                     break;
                 }
                 Err(TryRecvError::Empty) => break,
@@ -218,9 +261,16 @@ pub fn ui(ui: &mut egui::Ui, data_path: &mut Option<String>) -> LoadDataAction {
                     state.is_parsing = false;
                     state.parsed_successfully = false;
                     state.parse_failed_message = Some("Parser thread disconnected".to_string());
-                    state.receiver = None;
+                    state.parser_receiver = None;
                     state.warnings.clear();
                     state.warnings_acknowledged = false;
+                    state.cache_receiver = None;
+                    state.is_caching_award_images = false;
+                    state.cache_total = 0;
+                    state.cache_completed = 0;
+                    state.cache_ok = 0;
+                    state.cache_miss = 0;
+                    state.cache_failed_message = None;
                     state.parsed_contest_state = None;
                     state.parsed_config = None;
                     break;
@@ -228,6 +278,61 @@ pub fn ui(ui: &mut egui::Ui, data_path: &mut Option<String>) -> LoadDataAction {
             }
         }
 
+        ui.ctx().request_repaint();
+    }
+
+    if state.is_caching_award_images {
+        loop {
+            let event = {
+                let Some(rx) = &state.cache_receiver else {
+                    break;
+                };
+                rx.try_recv()
+            };
+
+            match event {
+                Ok(ImageCacheEvent::Started { total }) => {
+                    state.cache_total = total;
+                    state.cache_completed = 0;
+                    state.cache_ok = 0;
+                    state.cache_miss = 0;
+                    state.cache_failed_message = None;
+                }
+                Ok(ImageCacheEvent::Progress { completed, total }) => {
+                    state.cache_completed = completed;
+                    state.cache_total = total;
+                }
+                Ok(ImageCacheEvent::Finished {
+                    completed,
+                    total,
+                    ok,
+                    miss,
+                }) => {
+                    state.is_caching_award_images = false;
+                    state.cache_completed = completed;
+                    state.cache_total = total;
+                    state.cache_ok = ok;
+                    state.cache_miss = miss;
+                    state.cache_failed_message = None;
+                    state.cache_receiver = None;
+                    break;
+                }
+                Ok(ImageCacheEvent::Failed { message }) => {
+                    state.is_caching_award_images = false;
+                    state.cache_failed_message = Some(message);
+                    state.cache_receiver = None;
+                    break;
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    state.is_caching_award_images = false;
+                    state.cache_failed_message =
+                        Some("Award cache worker disconnected".to_string());
+                    state.cache_receiver = None;
+                    break;
+                }
+            }
+        }
         ui.ctx().request_repaint();
     }
 
@@ -251,9 +356,17 @@ pub fn ui(ui: &mut egui::Ui, data_path: &mut Option<String>) -> LoadDataAction {
                     state.errors.clear();
                     state.warnings.clear();
                     state.warnings_acknowledged = false;
+                    state.cache_receiver = None;
+                    state.is_caching_award_images = false;
+                    state.cache_total = 0;
+                    state.cache_completed = 0;
+                    state.cache_ok = 0;
+                    state.cache_miss = 0;
+                    state.cache_failed_message = None;
                     state.parsed_contest_state = None;
                     state.parsed_config = Some(config);
-                    state.receiver = Some(spawn_event_feed_parser(event_feed_path, parser_config));
+                    state.parser_receiver =
+                        Some(spawn_event_feed_parser(event_feed_path, parser_config));
                     ui.ctx().request_repaint();
                 }
                 Err(message) => {
@@ -266,9 +379,16 @@ pub fn ui(ui: &mut egui::Ui, data_path: &mut Option<String>) -> LoadDataAction {
                     state.errors = vec![message];
                     state.warnings.clear();
                     state.warnings_acknowledged = false;
+                    state.cache_receiver = None;
+                    state.is_caching_award_images = false;
+                    state.cache_total = 0;
+                    state.cache_completed = 0;
+                    state.cache_ok = 0;
+                    state.cache_miss = 0;
+                    state.cache_failed_message = None;
                     state.parsed_contest_state = None;
                     state.parsed_config = None;
-                    state.receiver = None;
+                    state.parser_receiver = None;
                 }
             },
             Err(validation_errors) => {
@@ -281,9 +401,16 @@ pub fn ui(ui: &mut egui::Ui, data_path: &mut Option<String>) -> LoadDataAction {
                 state.errors = validation_errors;
                 state.warnings.clear();
                 state.warnings_acknowledged = false;
+                state.cache_receiver = None;
+                state.is_caching_award_images = false;
+                state.cache_total = 0;
+                state.cache_completed = 0;
+                state.cache_ok = 0;
+                state.cache_miss = 0;
+                state.cache_failed_message = None;
                 state.parsed_contest_state = None;
                 state.parsed_config = None;
-                state.receiver = None;
+                state.parser_receiver = None;
             }
         }
     }
@@ -304,6 +431,73 @@ pub fn ui(ui: &mut egui::Ui, data_path: &mut Option<String>) -> LoadDataAction {
         );
     } else if let Some(msg) = &state.parse_failed_message {
         ui.colored_label(egui::Color32::LIGHT_RED, msg);
+    }
+
+    ui.add_space(8.0);
+    let can_precompute_cache = state.parsed_successfully
+        && !state.is_parsing
+        && !state.is_caching_award_images
+        && current_path.is_some()
+        && current_path == state.parsed_path
+        && state.parsed_contest_state.is_some()
+        && state.parsed_config.is_some();
+    if ui
+        .add_enabled(
+            can_precompute_cache,
+            egui::Button::new("Precompute Award Image Cache"),
+        )
+        .clicked()
+        && let Some(folder_path) = current_path.clone()
+        && let Some(contest_state) = state.parsed_contest_state.as_ref()
+        && let Some(config) = state.parsed_config.as_ref()
+    {
+        let team_ids = image_cache::collect_awarded_team_ids_bottom_to_top(contest_state);
+        let fallback_path = image_cache::resolve_fallback_path(
+            config.presentation.team_photo_fallback_path.as_deref(),
+        );
+        state.cache_receiver = Some(image_cache::spawn_image_cache_precompute(
+            PathBuf::from(folder_path),
+            team_ids,
+            config.presentation.team_photo_extension.clone(),
+            fallback_path,
+            1920,
+        ));
+        state.is_caching_award_images = true;
+        state.cache_total = 0;
+        state.cache_completed = 0;
+        state.cache_ok = 0;
+        state.cache_miss = 0;
+        state.cache_failed_message = None;
+        ui.ctx().request_repaint();
+    }
+
+    if state.is_caching_award_images
+        || state.cache_total > 0
+        || state.cache_failed_message.is_some()
+    {
+        let progress = if state.cache_total > 0 {
+            (state.cache_completed as f32 / state.cache_total as f32).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        ui.add(egui::ProgressBar::new(progress).text(format!(
+            "Award image cache: {} / {}",
+            state.cache_completed, state.cache_total
+        )));
+        if state.is_caching_award_images {
+            ui.label("Caching in background...");
+        } else if state.cache_total > 0 {
+            ui.colored_label(
+                egui::Color32::LIGHT_GREEN,
+                format!(
+                    "Cache precompute done. ok: {} | missing_or_failed: {}",
+                    state.cache_ok, state.cache_miss
+                ),
+            );
+        }
+        if let Some(msg) = &state.cache_failed_message {
+            ui.colored_label(egui::Color32::LIGHT_RED, msg);
+        }
     }
 
     if !state.errors.is_empty() {

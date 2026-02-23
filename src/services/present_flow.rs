@@ -198,7 +198,8 @@ pub fn advance_space_phase(
                             .is_some_and(team_has_pending_freeze)
                         {
                             flow.current_reveal_index = Some(current_index);
-                            outcome.scroll_index = clamp_scroll_index(Some(current_index), board.len());
+                            outcome.scroll_index =
+                                clamp_scroll_index(Some(current_index), board.len());
                             debug!("Space phase: RevealStep -> RevealStep(unsolved)");
                             SpacePhase::RevealStep
                         } else {
@@ -209,7 +210,10 @@ pub fn advance_space_phase(
                                 current_index.saturating_sub(1),
                             );
                             if let Some((team_id, citations)) = award {
-                                debug!("Space phase: RevealStep -> PendingAward(team_id={})", team_id);
+                                debug!(
+                                    "Space phase: RevealStep -> PendingAward(team_id={})",
+                                    team_id
+                                );
                                 SpacePhase::PendingAward {
                                     team_id,
                                     citations,
@@ -281,7 +285,10 @@ fn find_last_pending_index(board: &[TeamStatus]) -> Option<usize> {
     board.iter().rposition(team_has_pending_freeze)
 }
 
-fn find_next_pending_problem_id(team: &TeamStatus, ordered_problem_ids: &[String]) -> Option<String> {
+fn find_next_pending_problem_id(
+    team: &TeamStatus,
+    ordered_problem_ids: &[String],
+) -> Option<String> {
     for problem_id in ordered_problem_ids {
         if team
             .problem_stats
@@ -333,6 +340,7 @@ fn resort_leaderboard(board: &mut [TeamStatus]) {
     board.sort();
 }
 
+#[allow(clippy::type_complexity)]
 fn plan_award_or_advance(
     awards_by_team: &mut HashMap<String, Vec<String>>,
     board: &[TeamStatus],

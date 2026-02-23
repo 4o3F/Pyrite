@@ -1,15 +1,15 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
 use eframe::egui;
-use image::GenericImageView;
 use tracing::{debug, info, warn};
 
 use crate::models::{ContestState, Problem, TeamStatus};
 use crate::services::config_loader::PyriteConfig;
+use crate::services::image_cache::{self, DecodedImageData};
 use crate::services::present_flow::{self, PresentFlowState};
 
 pub enum PresentAction {
@@ -34,12 +34,6 @@ struct PresentUiState {
     award_decode_rx: Option<Receiver<AwardDecodeMsg>>,
     decoded_award_images: HashMap<String, Option<DecodedImageData>>,
     decoded_award_fallback: Option<Option<DecodedImageData>>,
-}
-
-struct DecodedImageData {
-    width: usize,
-    height: usize,
-    rgba: Vec<u8>,
 }
 
 enum AwardDecodeMsg {
@@ -441,19 +435,12 @@ fn maybe_start_award_predecode(
         return;
     }
 
-    let fallback_path = resolve_award_fallback_path(config);
-    let mut team_ids: Vec<String> = state.awards_by_team.keys().cloned().collect();
-    team_ids.sort_by(|a, b| {
-        contest_state
-            .leaderboard_finalized
-            .binary_search_by(|x| x.team_id.cmp(a))
-            .cmp(
-                &contest_state
-                    .leaderboard_finalized
-                    .binary_search_by(|x| x.team_id.cmp(b)),
-            )
-    });
-    team_ids.reverse();
+    let fallback_path =
+        image_cache::resolve_fallback_path(config.presentation.team_photo_fallback_path.as_deref());
+    let team_ids = image_cache::order_team_ids_bottom_to_top(
+        &contest_state.leaderboard_finalized,
+        state.awards_by_team.keys().cloned().collect(),
+    );
     info!(
         "Starting award image predecode for {} team(s), ext={}, fallback={}",
         team_ids.len(),
@@ -466,34 +453,147 @@ fn maybe_start_award_predecode(
     let (tx, rx) = mpsc::channel::<AwardDecodeMsg>();
     state.award_decode_rx = Some(rx);
 
+    let cache_root = image_cache::image_cache_root(&base_path);
     thread::spawn(move || {
-        let mut ok_count = 0usize;
-        let mut miss_count = 0usize;
-        let fallback_image = fallback_path
-            .as_deref()
-            .and_then(|path| decode_award_image_data(path, 1920));
-        if fallback_image.is_some() {
-            info!("Award fallback image decoded successfully");
-        } else {
-            debug!("Award fallback image not available or decode failed");
-        }
-        let _ = tx.send(AwardDecodeMsg::Fallback(fallback_image));
+        let worker_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .clamp(1, 4);
+        let max_decode_jobs = worker_threads.max(1);
 
-        for team_id in team_ids {
-            let path = base_path.join("teams").join(format!("{team_id}.{ext}"));
-            let image = if path.exists() && path.is_file() {
-                decode_award_image_data(&path, 1920)
-            } else {
-                None
-            };
-            if image.is_some() {
-                ok_count += 1;
-                info!("Award image for team {} predecode finished", team_id);
-            } else {
-                miss_count += 1;
+        let (ok_count, miss_count) = match tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(worker_threads)
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime.block_on(async move {
+                let mut ok_count = 0usize;
+                let mut miss_count = 0usize;
+                let fallback_cache_root = cache_root.clone();
+                let fallback_handle = fallback_path.map(|path| {
+                    tokio::task::spawn_blocking(move || {
+                        let cache_path = image_cache::image_cache_path_for_source(
+                            &fallback_cache_root,
+                            &path,
+                            "fallback",
+                            1920,
+                        );
+                        image_cache::decode_image_data_cached(&path, 1920, &cache_path)
+                    })
+                });
+                let fallback_image = match fallback_handle {
+                    Some(handle) => match handle.await {
+                        Ok(image) => image,
+                        Err(err) => {
+                            warn!("Award fallback decode task failed: {}", err);
+                            None
+                        }
+                    },
+                    None => None,
+                };
+                if fallback_image.is_some() {
+                    info!("Award fallback image decoded successfully");
+                } else {
+                    debug!("Award fallback image not available or decode failed");
+                }
+                let _ = tx.send(AwardDecodeMsg::Fallback(fallback_image));
+
+                let mut handles = Vec::with_capacity(max_decode_jobs);
+                for team_id in team_ids {
+                    let base = base_path.clone();
+                    let ext = ext.clone();
+                    let team_id_for_task = team_id.clone();
+                    let cache_root_for_task = cache_root.clone();
+                    let handle = tokio::task::spawn_blocking(move || {
+                        let cache_path = image_cache::image_cache_path_for_team(
+                            &cache_root_for_task,
+                            &team_id_for_task,
+                            1920,
+                        );
+                        let path = base.join("teams").join(format!("{team_id_for_task}.{ext}"));
+                        if path.exists() && path.is_file() {
+                            image_cache::decode_image_data_cached(&path, 1920, &cache_path)
+                        } else {
+                            None
+                        }
+                    });
+                    handles.push((team_id, handle));
+
+                    if handles.len() >= max_decode_jobs {
+                        let (team_id, handle) = handles.remove(0);
+                        let image = match handle.await {
+                            Ok(image) => image,
+                            Err(err) => {
+                                warn!("Award image decode task failed for {}: {}", team_id, err);
+                                None
+                            }
+                        };
+                        if image.is_some() {
+                            ok_count += 1;
+                            info!("Award image for team {} predecode finished", team_id);
+                        } else {
+                            miss_count += 1;
+                        }
+                        let _ = tx.send(AwardDecodeMsg::Team { team_id, image });
+                    }
+                }
+
+                for (team_id, handle) in handles {
+                    let image = match handle.await {
+                        Ok(image) => image,
+                        Err(err) => {
+                            warn!("Award image decode task failed for {}: {}", team_id, err);
+                            None
+                        }
+                    };
+                    if image.is_some() {
+                        ok_count += 1;
+                        info!("Award image for team {} predecode finished", team_id);
+                    } else {
+                        miss_count += 1;
+                    }
+                    let _ = tx.send(AwardDecodeMsg::Team { team_id, image });
+                }
+                (ok_count, miss_count)
+            }),
+            Err(err) => {
+                warn!(
+                    "Failed to initialize tokio runtime for award predecode: {}",
+                    err
+                );
+                let mut ok_count = 0usize;
+                let mut miss_count = 0usize;
+                let fallback_image = fallback_path.as_ref().and_then(|path| {
+                    let cache_path = image_cache::image_cache_path_for_source(
+                        &cache_root,
+                        path,
+                        "fallback",
+                        1920,
+                    );
+                    image_cache::decode_image_data_cached(path, 1920, &cache_path)
+                });
+                let _ = tx.send(AwardDecodeMsg::Fallback(fallback_image));
+
+                for team_id in team_ids {
+                    let path = base_path.join("teams").join(format!("{team_id}.{ext}"));
+                    let image = if path.exists() && path.is_file() {
+                        let cache_path =
+                            image_cache::image_cache_path_for_team(&cache_root, &team_id, 1920);
+                        image_cache::decode_image_data_cached(&path, 1920, &cache_path)
+                    } else {
+                        None
+                    };
+                    if image.is_some() {
+                        ok_count += 1;
+                        info!("Award image for team {} predecode finished", team_id);
+                    } else {
+                        miss_count += 1;
+                    }
+                    let _ = tx.send(AwardDecodeMsg::Team { team_id, image });
+                }
+                (ok_count, miss_count)
             }
-            let _ = tx.send(AwardDecodeMsg::Team { team_id, image });
-        }
+        };
         info!(
             "Award image predecode finished: ok={}, missing_or_failed={}",
             ok_count, miss_count
@@ -1014,8 +1114,21 @@ fn ensure_logo_loaded(
         return cached.clone();
     }
 
-    let loaded = resolve_team_logo_path(contest_state, team_id, data_path, config)
-        .and_then(|path| load_logo_texture(ctx, team_id, &path));
+    let loaded =
+        resolve_team_logo_path(contest_state, team_id, data_path, config).and_then(|path| {
+            let decoded = data_path
+                .map(PathBuf::from)
+                .map(|base| {
+                    let cache_root = image_cache::image_cache_root(&base);
+                    let cache_path =
+                        image_cache::image_cache_path_for_source(&cache_root, &path, "logo", 512);
+                    image_cache::decode_image_data_cached(&path, 512, &cache_path)
+                })
+                .unwrap_or_else(|| image_cache::decode_image_data(&path, 512));
+            decoded.and_then(|img| {
+                load_texture_from_decoded(ctx, &format!("team_logo_{team_id}"), &img)
+            })
+        });
     state.logo_cache.insert(team_id.to_string(), loaded.clone());
     loaded
 }
@@ -1041,7 +1154,19 @@ fn ensure_award_photo_loaded(
         })
         .or_else(|| {
             resolve_team_award_photo_path(team_id, data_path, config)
-                .and_then(|path| decode_award_image_data(&path, 1920))
+                .and_then(|path| {
+                    let cache_path = data_path.map(PathBuf::from).map(|base| {
+                        image_cache::image_cache_path_for_team(
+                            &image_cache::image_cache_root(&base),
+                            team_id,
+                            1920,
+                        )
+                    });
+                    match cache_path {
+                        Some(cache) => image_cache::decode_image_data_cached(&path, 1920, &cache),
+                        None => image_cache::decode_image_data(&path, 1920),
+                    }
+                })
                 .and_then(|img| {
                     load_texture_from_decoded(ctx, &format!("team_award_{team_id}"), &img)
                 })
@@ -1100,23 +1225,6 @@ fn resolve_team_logo_path(
     }
 }
 
-fn resolve_award_fallback_path(config: &PyriteConfig) -> Option<PathBuf> {
-    let raw_path = config
-        .presentation
-        .team_photo_fallback_path
-        .as_ref()?
-        .trim();
-    if raw_path.is_empty() {
-        return None;
-    }
-    let path = PathBuf::from(raw_path);
-    if path.exists() && path.is_file() {
-        Some(path)
-    } else {
-        None
-    }
-}
-
 fn resolve_team_award_photo_path(
     team_id: &str,
     data_path: Option<&str>,
@@ -1137,47 +1245,6 @@ fn resolve_team_award_photo_path(
     } else {
         None
     }
-}
-
-fn load_logo_texture(
-    ctx: &egui::Context,
-    team_id: &str,
-    path: &Path,
-) -> Option<egui::TextureHandle> {
-    load_image_texture(ctx, &format!("team_logo_{team_id}"), path)
-}
-
-fn load_image_texture(
-    ctx: &egui::Context,
-    texture_id: &str,
-    path: &Path,
-) -> Option<egui::TextureHandle> {
-    let bytes = std::fs::read(path).ok()?;
-    let decoded = image::load_from_memory(&bytes).ok()?;
-    let rgba = decoded.to_rgba8();
-    let size = [rgba.width() as usize, rgba.height() as usize];
-    let image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
-    Some(ctx.load_texture(texture_id.to_string(), image, egui::TextureOptions::LINEAR))
-}
-
-fn decode_award_image_data(path: &Path, max_dimension: u32) -> Option<DecodedImageData> {
-    let bytes = std::fs::read(path).ok()?;
-    let mut decoded = image::load_from_memory(&bytes).ok()?;
-    let (width, height) = decoded.dimensions();
-    let max_side = width.max(height);
-    if max_side > max_dimension {
-        decoded = decoded.resize(
-            max_dimension,
-            max_dimension,
-            image::imageops::FilterType::Triangle,
-        );
-    }
-    let rgba = decoded.to_rgba8();
-    Some(DecodedImageData {
-        width: rgba.width() as usize,
-        height: rgba.height() as usize,
-        rgba: rgba.into_raw(),
-    })
 }
 
 fn load_texture_from_decoded(
