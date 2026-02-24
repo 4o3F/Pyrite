@@ -2,7 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Pyrite.ViewModels"
              x:Class="Pyrite.Views.LoadDataStageView"
-             x:DataType="vm:MainWindowViewModel">
+             x:DataType="vm:LoadDataStageViewModel">
     <Border Padding="16" CornerRadius="8" BorderBrush="#3AFFFFFF" BorderThickness="1">
         <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
             <TextBlock Grid.Row="0" Text="Stage: load_data" FontSize="18" FontWeight="SemiBold" />

@@ -1,12 +1,24 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             x:Class="Pyrite.Views.PresentationStageView">
-    <Border Padding="16" CornerRadius="8" BorderBrush="#3AFFFFFF" BorderThickness="1">
-        <StackPanel Spacing="8">
-            <TextBlock Text="Stage: resolve_present" FontSize="18" FontWeight="SemiBold" />
-            <TextBlock Text="Resolve presentation page placeholder." TextWrapping="Wrap" />
-            <TextBlock Text="Implement scoreboard animation and actions in this page later." Opacity="0.75"
-                       TextWrapping="Wrap" />
-        </StackPanel>
-    </Border>
+             xmlns:vm="using:Pyrite.ViewModels"
+             x:Class="Pyrite.Views.PresentationStageView"
+             x:DataType="vm:PresentationStageViewModel"
+             Focusable="True">
+    <Grid Background="#111111" RowDefinitions="Auto,*">
+        <Border Grid.Row="0" Background="#141414" Padding="0,10">
+            <Grid ColumnDefinitions="70,110,*,120,140">
+                <TextBlock Grid.Column="0" Text="Rank" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center"
+                           VerticalAlignment="Center" Foreground="White" />
+                <TextBlock Grid.Column="2" Text="Team / Problems" FontSize="18" FontWeight="SemiBold"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White" />
+                <TextBlock Grid.Column="3" Text="Solved" FontSize="18" FontWeight="SemiBold"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White" />
+                <TextBlock Grid.Column="4" Text="Time" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center"
+                           VerticalAlignment="Center" Foreground="White" />
+            </Grid>
+        </Border>
+        <Border Grid.Row="1">
+            
+        </Border>
+    </Grid>
 </UserControl>

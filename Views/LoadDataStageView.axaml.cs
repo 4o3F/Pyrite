@@ -16,7 +16,7 @@ public partial class LoadDataStageView : UserControl
 
     private async void OnSelectFolderClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is not MainWindowViewModel viewModel) return;
+        if (DataContext is not LoadDataStageViewModel viewModel) return;
 
         var topLevel = TopLevel.GetTopLevel(this);
         if (topLevel?.StorageProvider is null) return;

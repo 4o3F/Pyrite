@@ -8,6 +8,7 @@
         d:DesignWidth="980"
         d:DesignHeight="640"
         x:Class="Pyrite.Views.MainWindow"
+        x:Name="RootWindow"
         x:DataType="vm:MainWindowViewModel"
         Icon="/Assets/avalonia-logo.ico"
         Title="Pyrite">
@@ -31,7 +32,9 @@
                 </Border>
 
                 <Grid Grid.Row="2">
-                    <views:LoadDataStageView IsVisible="{Binding IsLoadDataStage}" />
+                    <ContentControl IsVisible="{Binding IsLoadDataStage}">
+                        <views:LoadDataStageView DataContext="{Binding LoadDataStage}" />
+                    </ContentControl>
                     <ContentControl IsVisible="{Binding IsSetMedalStage}">
                         <views:SetMedalStageView DataContext="{Binding SetMedalStage}" />
                     </ContentControl>
@@ -47,6 +50,8 @@
             </Grid>
         </Border>
 
-        <views:PresentationStageView IsVisible="{Binding IsPresentationActive}" />
+        <ContentControl IsVisible="{Binding IsPresentationActive}">
+            <views:PresentationStageView DataContext="{Binding PresentationStage}" />
+        </ContentControl>
     </Grid>
 </Window>
