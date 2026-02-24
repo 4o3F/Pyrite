@@ -1,0 +1,50 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Pyrite.ViewModels"
+        xmlns:views="using:Pyrite.Views"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        d:DesignWidth="980"
+        d:DesignHeight="640"
+        x:Class="Pyrite.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="Pyrite">
+
+    <Design.DataContext>
+        <vm:MainWindowViewModel />
+    </Design.DataContext>
+
+    <Grid>
+        <Border Padding="24" IsVisible="{Binding IsWorkflowVisible}">
+            <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="16">
+                <StackPanel Grid.Row="0" Spacing="4">
+                    <TextBlock Text="Pyrite" FontSize="24" FontWeight="SemiBold" />
+                </StackPanel>
+
+                <Border Grid.Row="1" Padding="14" CornerRadius="8" BorderBrush="#3AFFFFFF" BorderThickness="1">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding StageTitle}" FontSize="20" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding StageDescription}" Opacity="0.9" />
+                    </StackPanel>
+                </Border>
+
+                <Grid Grid.Row="2">
+                    <views:LoadDataStageView IsVisible="{Binding IsLoadDataStage}" />
+                    <views:SetAwardStageView IsVisible="{Binding IsSetAwardStage}" />
+                </Grid>
+
+                <Grid Grid.Row="3" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                    <Button Grid.Column="0" Content="Previous" Command="{Binding PreviousStageCommand}"
+                            IsEnabled="{Binding CanMovePrevious}" MinWidth="110" />
+                    <Button Grid.Column="2" Content="{Binding PrimaryActionText}"
+                            Command="{Binding PrimaryActionCommand}"
+                            IsEnabled="{Binding CanExecutePrimaryAction}" MinWidth="110" />
+                </Grid>
+            </Grid>
+        </Border>
+
+        <views:PresentationStageView IsVisible="{Binding IsPresentationActive}" />
+    </Grid>
+</Window>
