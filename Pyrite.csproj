@@ -25,10 +25,4 @@
         <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.1"/>
         <PackageReference Include="Tomlyn" Version="0.20.0"/>
     </ItemGroup>
-
-    <ItemGroup>
-        <Compile Update="Views\LoadDataStageView.axaml.cs">
-            <DependentUpon>LoadDataStageView.axaml</DependentUpon>
-        </Compile>
-    </ItemGroup>
 </Project>

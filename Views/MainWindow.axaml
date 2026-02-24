@@ -32,7 +32,9 @@
 
                 <Grid Grid.Row="2">
                     <views:LoadDataStageView IsVisible="{Binding IsLoadDataStage}" />
-                    <views:SetAwardStageView IsVisible="{Binding IsSetAwardStage}" />
+                    <ContentControl IsVisible="{Binding IsSetMedalStage}">
+                        <views:SetMedalStageView DataContext="{Binding SetMedalStage}" />
+                    </ContentControl>
                 </Grid>
 
                 <Grid Grid.Row="3" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">

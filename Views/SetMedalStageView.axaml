@@ -1,0 +1,180 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Pyrite.ViewModels"
+             x:Class="Pyrite.Views.SetMedalStageView"
+             x:DataType="vm:SetMedalStageViewModel">
+    <Border Padding="16" CornerRadius="8" BorderBrush="#3AFFFFFF" BorderThickness="1">
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="10">
+                <TextBlock Text="Set Medal" FontSize="18" FontWeight="SemiBold" />
+                <TextBlock Text="Configure medal settings for the presentation." />
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Save Medals" Click="OnSaveMedalsClick" IsEnabled="{Binding HasContestState}" />
+                    <Button Content="Load Medals" Click="OnLoadMedalsClick" IsEnabled="{Binding HasContestState}" />
+                </StackPanel>
+
+                <Grid ColumnDefinitions="*,*,*" ColumnSpacing="10">
+                    <Border Grid.Column="0" Padding="10" CornerRadius="8" BorderBrush="#3AFFFFFF" BorderThickness="1">
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Categories for medal calculation" FontWeight="SemiBold" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Select All" Command="{Binding SelectAllGroupsCommand}"
+                                        IsEnabled="{Binding HasContestState}" />
+                                <Button Content="Clear All" Command="{Binding ClearAllGroupsCommand}"
+                                        IsEnabled="{Binding HasContestState}" />
+                            </StackPanel>
+                            <Border BorderBrush="#2AFFFFFF" BorderThickness="1" CornerRadius="6" Padding="6">
+                                <ScrollViewer MaxHeight="360">
+                                    <ItemsControl ItemsSource="{Binding Groups}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <CheckBox Content="{Binding DisplayLabel}"
+                                                          IsChecked="{Binding IsSelected}" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="1" Padding="10" CornerRadius="8" BorderBrush="#3AFFFFFF" BorderThickness="1">
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Medal setup and preview" FontWeight="SemiBold" />
+
+                            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8"
+                                  RowSpacing="6">
+                                <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="Gold count" />
+                                <NumericUpDown Grid.Row="0" Grid.Column="1" Minimum="0" Maximum="1000000"
+                                               Value="{Binding MedalGoldCount}" />
+                                <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center"
+                                           Text="Silver count" />
+                                <NumericUpDown Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="1000000"
+                                               Value="{Binding MedalSilverCount}" />
+                                <TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center"
+                                           Text="Bronze count" />
+                                <NumericUpDown Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="1000000"
+                                               Value="{Binding MedalBronzeCount}" />
+                            </Grid>
+
+                            <TextBlock Text="Gold citation" />
+                            <TextBox Text="{Binding MedalGoldCitation}" />
+                            <TextBlock Text="Silver citation" />
+                            <TextBox Text="{Binding MedalSilverCitation}" />
+                            <TextBlock Text="Bronze citation" />
+                            <TextBox Text="{Binding MedalBronzeCitation}" />
+
+                            <TextBlock Text="{Binding EligibleTeamCount, StringFormat=Eligible teams: {0}}" />
+                            <TextBlock IsVisible="{Binding RequestedMedalsExceedEligible}"
+                                       Foreground="#E5C65C"
+                                       Text="{Binding RequestedMedalCount, StringFormat=Requested medals ({0}) exceed eligible teams.}" />
+
+                            <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="4">
+                                <Border Grid.Row="0" BorderBrush="#2AFFFFFF" BorderThickness="1" CornerRadius="6"
+                                        Padding="6">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="Gold winners" FontWeight="SemiBold" />
+                                        <ScrollViewer MaxHeight="110">
+                                            <ItemsControl ItemsSource="{Binding GoldPreview}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding DisplayLabel}" />
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Row="1" BorderBrush="#2AFFFFFF" BorderThickness="1" CornerRadius="6"
+                                        Padding="6">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="Silver winners" FontWeight="SemiBold" />
+                                        <ScrollViewer MaxHeight="110">
+                                            <ItemsControl ItemsSource="{Binding SilverPreview}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding DisplayLabel}" />
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Row="2" BorderBrush="#2AFFFFFF" BorderThickness="1" CornerRadius="6"
+                                        Padding="6">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="Bronze winners" FontWeight="SemiBold" />
+                                        <ScrollViewer MaxHeight="110">
+                                            <ItemsControl ItemsSource="{Binding BronzePreview}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding DisplayLabel}" />
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <Button Content="Apply Medals" Command="{Binding ApplyMedalsCommand}"
+                                    IsEnabled="{Binding HasContestState}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="2" Padding="10" CornerRadius="8" BorderBrush="#3AFFFFFF" BorderThickness="1">
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Current medals" FontWeight="SemiBold" />
+                            <Border BorderBrush="#2AFFFFFF" BorderThickness="1" CornerRadius="6" Padding="6">
+                                <ScrollViewer MaxHeight="430">
+                                    <ItemsControl ItemsSource="{Binding Medals}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border BorderBrush="#2AFFFFFF" BorderThickness="1" CornerRadius="6"
+                                                        Padding="8" Margin="0,0,0,8">
+                                                    <StackPanel Spacing="4">
+                                                        <TextBlock Text="{Binding Id, StringFormat=ID: {0}}" />
+                                                        <TextBlock
+                                                            Text="{Binding Citation, StringFormat=Citation: {0}}" />
+                                                        <TextBlock Text="{Binding TeamCount, StringFormat=Teams: {0}}" />
+                                                        <TextBlock
+                                                            Text="{Binding TeamPreview, StringFormat=Team IDs: {0}}" />
+                                                        <Button Content="Delete" Tag="{Binding Id}"
+                                                                Click="OnDeleteMedalClick" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <Border Padding="10" CornerRadius="8" BorderBrush="#3AFFFFFF" BorderThickness="1">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Manual custom medal" FontWeight="SemiBold" />
+                        <TextBlock Text="Medal ID" />
+                        <TextBox Text="{Binding ManualMedalId}" />
+                        <TextBlock Text="Citation" />
+                        <TextBox Text="{Binding ManualCitation}" />
+                        <TextBlock Text="Team IDs (comma separated)" />
+                        <TextBox Text="{Binding ManualTeamIdsCsv}" />
+                        <Button Content="Add/Update Medal" Command="{Binding AddOrUpdateMedalCommand}"
+                                IsEnabled="{Binding HasContestState}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Padding="8" CornerRadius="8" BorderBrush="#3AFFFFFF" BorderThickness="1"
+                        IsVisible="{Binding HasStatusMessage}">
+                    <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" />
+                </Border>
+
+                <Button HorizontalAlignment="Left" Content="Present" Click="OnPresentClick"
+                        IsEnabled="{Binding HasContestState}" />
+            </StackPanel>
+        </ScrollViewer>
+    </Border>
+</UserControl>

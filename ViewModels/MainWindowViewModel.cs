@@ -1,7 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.Input;
@@ -13,26 +12,26 @@ namespace Pyrite.ViewModels;
 public enum AppStage
 {
     LoadData = 0,
-    SetAward = 1
+    SetMedal = 1
 }
 
-public partial class MainWindowViewModel : ViewModelBase
+public class MainWindowViewModel : ViewModelBase
 {
-    private AppStage _currentStage = AppStage.LoadData;
-    private bool _isPresentationActive;
-
     private string? _cdpPath;
-    private bool _isParsing;
+    private AppStage _currentStage = AppStage.LoadData;
     private bool _isParseSuccessful;
-    private double _parseProgress;
-    private string _parseStatus = "Select a CDP folder to begin.";
-    private string _validationStatus = string.Empty;
+    private bool _isParsing;
+    private bool _isPresentationActive;
     private PyriteConfig _loadedConfig = PyriteConfig.Default();
     private ContestState? _loadedContestState;
     private CancellationTokenSource? _parseCts;
+    private double _parseProgress;
+    private string _parseStatus = "Select a CDP folder to begin.";
+    private string _validationStatus = string.Empty;
 
     public MainWindowViewModel()
     {
+        SetMedalStage = new SetMedalStageViewModel();
         PreviousStageCommand = new RelayCommand(MovePrevious, () => CanMovePrevious);
         NextStageCommand = new RelayCommand(MoveNext, () => CanMoveNext);
         LaunchPresentationCommand = new RelayCommand(LaunchPresentation, () => CanLaunchPresentation);
@@ -46,6 +45,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public RelayCommand NextStageCommand { get; }
     public RelayCommand LaunchPresentationCommand { get; }
     public RelayCommand PrimaryActionCommand { get; }
+    public SetMedalStageViewModel SetMedalStage { get; }
 
     public ObservableCollection<string> ParseErrors { get; }
     public ObservableCollection<string> ParseWarnings { get; }
@@ -61,7 +61,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 OnPropertyChanged(nameof(StageTitle));
                 OnPropertyChanged(nameof(StageDescription));
                 OnPropertyChanged(nameof(IsLoadDataStage));
-                OnPropertyChanged(nameof(IsSetAwardStage));
+                OnPropertyChanged(nameof(IsSetMedalStage));
                 NotifyWorkflowStateChanged();
             }
         }
@@ -85,26 +85,26 @@ public partial class MainWindowViewModel : ViewModelBase
     public string CurrentStageKey => CurrentStage switch
     {
         AppStage.LoadData => "load_data",
-        AppStage.SetAward => "set_award",
+        AppStage.SetMedal => "set_medal",
         _ => "unknown"
     };
 
     public string StageTitle => CurrentStage switch
     {
         AppStage.LoadData => "Load Data",
-        AppStage.SetAward => "Set Award",
+        AppStage.SetMedal => "Set Medal",
         _ => "Unknown Stage"
     };
 
     public string StageDescription => CurrentStage switch
     {
         AppStage.LoadData => "Validate CDP input, parse event-feed.ndjson, and build standings.",
-        AppStage.SetAward => "Review ranking and assign award citations, then launch presentation.",
+        AppStage.SetMedal => "Review ranking and assign medal citations, then launch presentation.",
         _ => string.Empty
     };
 
     public bool IsLoadDataStage => CurrentStage == AppStage.LoadData;
-    public bool IsSetAwardStage => CurrentStage == AppStage.SetAward;
+    public bool IsSetMedalStage => CurrentStage == AppStage.SetMedal;
 
     public string? CdpPath
     {
@@ -132,10 +132,7 @@ public partial class MainWindowViewModel : ViewModelBase
         get => _isParseSuccessful;
         private set
         {
-            if (SetProperty(ref _isParseSuccessful, value))
-            {
-                NotifyWorkflowStateChanged();
-            }
+            if (SetProperty(ref _isParseSuccessful, value)) NotifyWorkflowStateChanged();
         }
     }
 
@@ -162,10 +159,10 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool HasParseWarnings => ParseWarnings.Count > 0;
 
     public bool CanMovePrevious => !IsPresentationActive && CurrentStage > AppStage.LoadData;
-    public bool CanMoveNext => !IsPresentationActive && CurrentStage < AppStage.SetAward && CanAdvanceCurrentStage;
-    public bool CanLaunchPresentation => !IsPresentationActive && CurrentStage == AppStage.SetAward;
+    public bool CanMoveNext => !IsPresentationActive && CurrentStage < AppStage.SetMedal && CanAdvanceCurrentStage;
+    public bool CanLaunchPresentation => !IsPresentationActive && CurrentStage == AppStage.SetMedal;
     public bool CanExecutePrimaryAction => CanMoveNext || CanLaunchPresentation;
-    public string PrimaryActionText => CurrentStage == AppStage.SetAward ? "Launch" : "Next";
+    public string PrimaryActionText => CurrentStage == AppStage.SetMedal ? "Launch" : "Next";
 
     private bool CanAdvanceCurrentStage => CurrentStage switch
     {
@@ -181,10 +178,7 @@ public partial class MainWindowViewModel : ViewModelBase
         var validationErrors = ValidateCdpFolder(folderPath);
         if (validationErrors.Count > 0)
         {
-            foreach (var error in validationErrors)
-            {
-                ParseErrors.Add(error);
-            }
+            foreach (var error in validationErrors) ParseErrors.Add(error);
 
             ValidationStatus = "CDP folder validation failed.";
             OnPropertyChanged(nameof(HasValidationStatus));
@@ -229,15 +223,9 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             var result = await EventFeedParser.ParseAsync(eventFeedPath, _loadedConfig, progress, _parseCts.Token);
 
-            foreach (var warning in result.Warnings)
-            {
-                ParseWarnings.Add(warning);
-            }
+            foreach (var warning in result.Warnings) ParseWarnings.Add(warning);
 
-            foreach (var error in result.Errors)
-            {
-                ParseErrors.Add(error);
-            }
+            foreach (var error in result.Errors) ParseErrors.Add(error);
 
             OnPropertyChanged(nameof(HasParseWarnings));
             OnPropertyChanged(nameof(HasParseErrors));
@@ -250,6 +238,7 @@ public partial class MainWindowViewModel : ViewModelBase
             }
 
             _loadedContestState = result.ContestState;
+            SetMedalStage.SetContestState(_loadedContestState);
             ParseProgress = 1;
             ParseStatus = result.Warnings.Count > 0
                 ? $"Parsed successfully with {result.Warnings.Count} warning(s)."
@@ -285,22 +274,13 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         var eventFeedPath = Path.Combine(folderPath, "event-feed.ndjson");
-        if (!File.Exists(eventFeedPath))
-        {
-            errors.Add("Missing required file: event-feed.ndjson");
-        }
+        if (!File.Exists(eventFeedPath)) errors.Add("Missing required file: event-feed.ndjson");
 
         var teamsPath = Path.Combine(folderPath, "teams");
-        if (!Directory.Exists(teamsPath))
-        {
-            errors.Add("Missing required folder: teams");
-        }
+        if (!Directory.Exists(teamsPath)) errors.Add("Missing required folder: teams");
 
         var affiliationsPath = Path.Combine(folderPath, "affiliations");
-        if (!Directory.Exists(affiliationsPath))
-        {
-            errors.Add("Missing required folder: affiliations");
-        }
+        if (!Directory.Exists(affiliationsPath)) errors.Add("Missing required folder: affiliations");
 
         return errors;
     }
@@ -314,6 +294,7 @@ public partial class MainWindowViewModel : ViewModelBase
         ParseProgress = 0;
         IsParseSuccessful = false;
         _loadedContestState = null;
+        SetMedalStage.SetContestState(null);
 
         OnPropertyChanged(nameof(HasValidationStatus));
         OnPropertyChanged(nameof(HasParseErrors));
@@ -335,30 +316,23 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void MovePrevious()
     {
-        if (!CanMovePrevious)
-        {
-            return;
-        }
+        if (!CanMovePrevious) return;
 
         CurrentStage -= 1;
     }
 
     private void MoveNext()
     {
-        if (!CanMoveNext)
-        {
-            return;
-        }
+        if (!CanMoveNext) return;
 
         CurrentStage += 1;
     }
 
     private void LaunchPresentation()
     {
-        if (!CanLaunchPresentation)
-        {
-            return;
-        }
+        if (!CanLaunchPresentation) return;
+
+        if (!SetMedalStage.TryPreparePresentation(out _)) return;
 
         IsPresentationActive = true;
     }
@@ -371,9 +345,6 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        if (CanLaunchPresentation)
-        {
-            LaunchPresentation();
-        }
+        if (CanLaunchPresentation) LaunchPresentation();
     }
 }
