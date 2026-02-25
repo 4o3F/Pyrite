@@ -7,14 +7,22 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
 
 namespace Pyrite.ViewModels;
 
 public sealed class PresentationStageViewModel : ViewModelBase
 {
+    private static readonly Dictionary<string, Bitmap?> ImageCache = new(StringComparer.OrdinalIgnoreCase);
     private ContestState? _contestState;
+    private Bitmap? _awardAffiliationLogoImage;
+    private Bitmap? _awardBackgroundImage;
+    private bool _awardBackgroundImageOwned;
+    private string _awardTeamName = string.Empty;
+    private string _awardText = string.Empty;
     private string? _dataPath;
     private int _focusedRowIndex = -1;
+    private bool _isAwardOverlayVisible;
     private bool _isInitialized;
     private bool _isStarted;
     private PyriteConfig _loadedConfig = PyriteConfig.Default();
@@ -48,6 +56,31 @@ public sealed class PresentationStageViewModel : ViewModelBase
     }
     public double RowFlyAnimationSeconds => Math.Max(0.01, _loadedConfig.Presentation.RowFlyAnimationSeconds);
     public double ScrollAnimationSeconds => Math.Max(0.01, _loadedConfig.Presentation.ScrollAnimationSeconds);
+    public bool IsAwardOverlayVisible
+    {
+        get => _isAwardOverlayVisible;
+        private set => SetProperty(ref _isAwardOverlayVisible, value);
+    }
+    public Bitmap? AwardBackgroundImage
+    {
+        get => _awardBackgroundImage;
+        private set => SetProperty(ref _awardBackgroundImage, value);
+    }
+    public Bitmap? AwardAffiliationLogoImage
+    {
+        get => _awardAffiliationLogoImage;
+        private set => SetProperty(ref _awardAffiliationLogoImage, value);
+    }
+    public string AwardTeamName
+    {
+        get => _awardTeamName;
+        private set => SetProperty(ref _awardTeamName, value);
+    }
+    public string AwardText
+    {
+        get => _awardText;
+        private set => SetProperty(ref _awardText, value);
+    }
 
     public PresentationRowState State
     {
@@ -110,6 +143,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
         _loadedConfig = config;
         OnPropertyChanged(nameof(RowFlyAnimationSeconds));
         OnPropertyChanged(nameof(ScrollAnimationSeconds));
+        HideAwardOverlay();
         _dataPath = dataPath;
         InitializePresentationRows(contestState);
         FocusedRowIndex = FindInitialFocusedRowIndex();
@@ -204,6 +238,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
                         if (HasAwards(teamId))
                         {
                             // Team has award, show it
+                            ShowAwardOverlay(teamId);
                             State = PresentationRowState.RowCompleteAwardShowing;
                         }
                         else
@@ -222,7 +257,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
                 State = PresentationRowState.RowInProgress;
                 break;
             case PresentationRowState.RowCompleteAwardShowing:
-                // TODO: hide/finish award presentation logic
+                HideAwardOverlay();
                 State = PresentationRowState.RowCompleteReadyToAdvance;
                 break;
             case PresentationRowState.RowCompleteReadyToAdvance:
@@ -415,6 +450,185 @@ public sealed class PresentationStageViewModel : ViewModelBase
         }
 
         return false;
+    }
+
+    private void ShowAwardOverlay(string teamId)
+    {
+        if (string.IsNullOrWhiteSpace(teamId) || _contestState is null)
+        {
+            HideAwardOverlay();
+            return;
+        }
+
+        var row = PreFreezeRows.FirstOrDefault(r => string.Equals(r.TeamId, teamId, StringComparison.Ordinal));
+        var teamName = row?.TeamName;
+        var teamAffiliation = row?.TeamStatus.TeamAffiliation;
+        if (string.IsNullOrWhiteSpace(teamName) &&
+            _contestState.Teams.TryGetValue(teamId, out var team))
+        {
+            teamName = string.IsNullOrWhiteSpace(team.DisplayName) ? team.Name : team.DisplayName;
+        }
+
+        AwardTeamName = teamName ?? teamId;
+        AwardText = BuildAwardText(teamId);
+        AwardBackgroundImage = LoadImageUncached(BuildTeamPhotoPath(teamId));
+        _awardBackgroundImageOwned = AwardBackgroundImage is not null;
+        AwardAffiliationLogoImage = LoadImage(BuildAffiliationLogoPath(teamAffiliation));
+        IsAwardOverlayVisible = true;
+        Trace.WriteLine(
+            $"[PresentationStageVM] AwardOverlayShow: teamId={teamId}, teamName={AwardTeamName}, hasPhoto={AwardBackgroundImage is not null}, hasAffiliationLogo={AwardAffiliationLogoImage is not null}");
+    }
+
+    private void HideAwardOverlay()
+    {
+        if (_awardBackgroundImageOwned && AwardBackgroundImage is not null)
+        {
+            AwardBackgroundImage.Dispose();
+        }
+
+        IsAwardOverlayVisible = false;
+        AwardBackgroundImage = null;
+        _awardBackgroundImageOwned = false;
+        AwardAffiliationLogoImage = null;
+        AwardTeamName = string.Empty;
+        AwardText = string.Empty;
+
+        // Award photos are large and each team is shown once; collect promptly after dismissal.
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+    }
+
+    private string BuildAwardText(string teamId)
+    {
+        if (_contestState is null)
+        {
+            return string.Empty;
+        }
+
+        var lines = new List<string>();
+        foreach (var award in _contestState.Awards.Values)
+        {
+            if (!award.TeamIds.Contains(teamId, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            var label = string.IsNullOrWhiteSpace(award.Citation) ? award.Id : award.Citation;
+            if (!string.IsNullOrWhiteSpace(label))
+            {
+                lines.Add($"{label}");
+            }
+        }
+
+        if (lines.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder();
+        foreach (var line in lines.Distinct(StringComparer.Ordinal))
+        {
+            builder.AppendLine(line);
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private string? BuildTeamPhotoPath(string teamId)
+    {
+        var teamPhotoExtension = _loadedConfig.Presentation.TeamPhotoExtension?.Trim().TrimStart('.');
+        if (!string.IsNullOrWhiteSpace(_dataPath) &&
+            !string.IsNullOrWhiteSpace(teamId) &&
+            !string.IsNullOrWhiteSpace(teamPhotoExtension))
+        {
+            var primaryPath = Path.Combine(_dataPath, "teams", $"{teamId}.{teamPhotoExtension}");
+            if (File.Exists(primaryPath))
+            {
+                return primaryPath;
+            }
+        }
+
+        var fallbackPath = _loadedConfig.Presentation.TeamPhotoFallbackPath;
+        if (string.IsNullOrWhiteSpace(fallbackPath))
+        {
+            return null;
+        }
+
+        if (Path.IsPathRooted(fallbackPath))
+        {
+            return File.Exists(fallbackPath) ? fallbackPath : null;
+        }
+
+        if (string.IsNullOrWhiteSpace(_dataPath))
+        {
+            return File.Exists(fallbackPath) ? fallbackPath : null;
+        }
+
+        var combinedPath = Path.Combine(_dataPath, fallbackPath);
+        return File.Exists(combinedPath) ? combinedPath : (File.Exists(fallbackPath) ? fallbackPath : null);
+    }
+
+    private string? BuildAffiliationLogoPath(string? teamAffiliation)
+    {
+        if (string.IsNullOrWhiteSpace(_dataPath) ||
+            string.IsNullOrWhiteSpace(teamAffiliation) ||
+            string.IsNullOrWhiteSpace(_loadedConfig.Presentation.LogoExtension))
+        {
+            return null;
+        }
+
+        var extension = _loadedConfig.Presentation.LogoExtension.Trim().TrimStart('.');
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            return null;
+        }
+
+        var candidatePath = Path.Combine(_dataPath, "affiliations", $"{teamAffiliation}.{extension}");
+        return File.Exists(candidatePath) ? candidatePath : null;
+    }
+
+    private static Bitmap? LoadImage(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        if (ImageCache.TryGetValue(path, out var cached))
+        {
+            return cached;
+        }
+
+        Bitmap? bitmap;
+        try
+        {
+            bitmap = new Bitmap(path);
+        }
+        catch
+        {
+            bitmap = null;
+        }
+
+        ImageCache[path] = bitmap;
+        return bitmap;
+    }
+
+    private static Bitmap? LoadImageUncached(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return new Bitmap(path);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private void RefreshRanks()

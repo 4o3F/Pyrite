@@ -20,16 +20,21 @@ public partial class PresentationStageView : UserControl
     private const double FocusAnchorRatio = 2.0 / 3.0;
     private const double ScrollEpsilon = 0.5;
     private static readonly TimeSpan FocusScrollDuration = TimeSpan.FromMilliseconds(180);
+    private static readonly TimeSpan AwardOverlayFadeDuration = TimeSpan.FromMilliseconds(260);
     private const double DefaultRowFlyAnimationSeconds = 0.6;
     private const double DefaultScrollAnimationSeconds = 0.4;
 
     private INotifyPropertyChanged? _subscribedViewModel;
     private DispatcherTimer? _scrollAnimationTimer;
     private DispatcherTimer? _moveUpAnimationTimer;
+    private DispatcherTimer? _awardOverlayFadeTimer;
     private ScrollViewer? _animatedScrollViewer;
     private long _animationStartTimestamp;
+    private long _awardOverlayFadeStartTimestamp;
     private double _animationStartOffsetY;
     private double _animationTargetOffsetY;
+    private double _awardOverlayFadeStartOpacity;
+    private double _awardOverlayFadeTargetOpacity;
     private bool _anchorRequestQueued;
     private bool _deferredRetryQueued;
     private long _lastHandledMoveUpRequestId;
@@ -73,6 +78,7 @@ public partial class PresentationStageView : UserControl
     {
         StopScrollAnimation();
         StopAllMoveUpAnimations();
+        StopAwardOverlayFadeAnimation();
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
@@ -92,11 +98,27 @@ public partial class PresentationStageView : UserControl
             _subscribedViewModel.PropertyChanged += OnViewModelPropertyChanged;
         }
 
+        if (DataContext is PresentationStageViewModel vm)
+        {
+            SetAwardOverlayVisibilityImmediate(vm.IsAwardOverlayVisible);
+        }
+        else
+        {
+            SetAwardOverlayVisibilityImmediate(false);
+        }
+
         RequestFocusedRowAnchor();
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(PresentationStageViewModel.IsAwardOverlayVisible))
+        {
+            var isVisible = (DataContext as PresentationStageViewModel)?.IsAwardOverlayVisible ?? false;
+            AnimateAwardOverlayVisibility(isVisible);
+            return;
+        }
+
         if (e.PropertyName == nameof(PresentationStageViewModel.MoveUpAnimationRequest))
         {
             HandleMoveUpAnimationRequest();
@@ -280,6 +302,13 @@ public partial class PresentationStageView : UserControl
     {
         var oneMinusT = 1 - t;
         return 1 - (oneMinusT * oneMinusT * oneMinusT);
+    }
+
+    private static double EaseInOutCubic(double t)
+    {
+        return t < 0.5
+            ? 4 * t * t * t
+            : 1 - Math.Pow(-2 * t + 2, 3) / 2;
     }
 
     private void TryStartMoveUpAnimation(MoveUpAnimationRequest request, bool allowDeferredRetry)
@@ -604,6 +633,65 @@ public partial class PresentationStageView : UserControl
             _moveUpAnimationTimer.Stop();
             Trace.WriteLine("[MoveUpAnim] Timer stopped.");
         }
+    }
+
+    private void AnimateAwardOverlayVisibility(bool visible)
+    {
+        _awardOverlayFadeStartOpacity = AwardOverlayRoot.Opacity;
+        _awardOverlayFadeTargetOpacity = visible ? 1 : 0;
+        _awardOverlayFadeStartTimestamp = Stopwatch.GetTimestamp();
+
+        if (visible)
+        {
+            AwardOverlayRoot.IsVisible = true;
+        }
+
+        if (_awardOverlayFadeTimer is null)
+        {
+            _awardOverlayFadeTimer = new DispatcherTimer(
+                TimeSpan.FromMilliseconds(16),
+                DispatcherPriority.Render,
+                OnAwardOverlayFadeTick);
+        }
+
+        _awardOverlayFadeTimer.Stop();
+        _awardOverlayFadeTimer.Start();
+    }
+
+    private void OnAwardOverlayFadeTick(object? sender, EventArgs e)
+    {
+        if (_awardOverlayFadeTimer is null)
+        {
+            return;
+        }
+
+        var elapsedSeconds = (Stopwatch.GetTimestamp() - _awardOverlayFadeStartTimestamp) / (double)Stopwatch.Frequency;
+        var progress = Math.Clamp(elapsedSeconds / AwardOverlayFadeDuration.TotalSeconds, 0, 1);
+        var eased = EaseInOutCubic(progress);
+        AwardOverlayRoot.Opacity =
+            _awardOverlayFadeStartOpacity + ((_awardOverlayFadeTargetOpacity - _awardOverlayFadeStartOpacity) * eased);
+
+        if (progress >= 1)
+        {
+            AwardOverlayRoot.Opacity = _awardOverlayFadeTargetOpacity;
+            AwardOverlayRoot.IsVisible = _awardOverlayFadeTargetOpacity > 0;
+            _awardOverlayFadeTimer.Stop();
+        }
+    }
+
+    private void StopAwardOverlayFadeAnimation()
+    {
+        if (_awardOverlayFadeTimer is not null)
+        {
+            _awardOverlayFadeTimer.Stop();
+        }
+    }
+
+    private void SetAwardOverlayVisibilityImmediate(bool visible)
+    {
+        StopAwardOverlayFadeAnimation();
+        AwardOverlayRoot.IsVisible = visible;
+        AwardOverlayRoot.Opacity = visible ? 1 : 0;
     }
 
     private void CompleteMoveUpAnimation(ActiveMoveUpAnimation animation)

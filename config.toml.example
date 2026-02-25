@@ -1,0 +1,10 @@
+filter_team_submissions = ["domjudge"]
+team_group_map = { "team301" = "star" }
+
+[presentation]
+rows_per_page = 12
+scroll_animation_seconds = 0.5
+row_fly_animation_seconds = 0.5
+logo_extension = "jpg"
+team_photo_extension = "jpg"
+team_photo_fallback_path = "/135769226_p0.png"

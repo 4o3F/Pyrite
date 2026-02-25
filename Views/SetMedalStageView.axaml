@@ -172,8 +172,6 @@
                     <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" />
                 </Border>
 
-                <Button HorizontalAlignment="Left" Content="Present" Click="OnPresentClick"
-                        IsEnabled="{Binding HasContestState}" />
             </StackPanel>
         </ScrollViewer>
     </Border>
