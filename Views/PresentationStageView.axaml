@@ -1,24 +1,110 @@
 <UserControl xmlns="https://github.com/avaloniaui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vm="using:Pyrite.ViewModels"
-             x:Class="Pyrite.Views.PresentationStageView"
-             x:DataType="vm:PresentationStageViewModel"
-             Focusable="True">
-    <Grid Background="#111111" RowDefinitions="Auto,*">
-        <Border Grid.Row="0" Background="#141414" Padding="0,10">
-            <Grid ColumnDefinitions="70,110,*,120,140">
-                <TextBlock Grid.Column="0" Text="Rank" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center"
-                           VerticalAlignment="Center" Foreground="White" />
-                <TextBlock Grid.Column="2" Text="Team / Problems" FontSize="18" FontWeight="SemiBold"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White" />
-                <TextBlock Grid.Column="3" Text="Solved" FontSize="18" FontWeight="SemiBold"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White" />
-                <TextBlock Grid.Column="4" Text="Time" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center"
-                           VerticalAlignment="Center" Foreground="White" />
-            </Grid>
-        </Border>
-        <Border Grid.Row="1">
-            
-        </Border>
-    </Grid>
+			 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+			 xmlns:vm="using:Pyrite.ViewModels"
+			 x:Class="Pyrite.Views.PresentationStageView"
+			 x:DataType="vm:PresentationStageViewModel"
+			 Focusable="True">
+	<Grid Background="#111111" RowDefinitions="Auto,*">
+		<Border Grid.Row="0" Background="#141414" Padding="0,10">
+			<Grid ColumnDefinitions="70,110,*,120,140" ShowGridLines="True">
+				<TextBlock Grid.Column="0" Text="Rank" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center"
+						   VerticalAlignment="Center" Foreground="White" />
+				<TextBlock Grid.Column="2" Text="Team / Problems" FontSize="18" FontWeight="SemiBold"
+						   HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White" />
+				<TextBlock Grid.Column="3" Text="Solved" FontSize="18" FontWeight="SemiBold"
+						   HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White" />
+				<TextBlock Grid.Column="4" Text="Time" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center"
+						   VerticalAlignment="Center" Foreground="White" />
+			</Grid>
+		</Border>
+
+		<ListBox Grid.Row="1"
+				 Classes="scoreboard"
+				 Background="#111111"
+				 BorderThickness="0"
+				 ItemsSource="{Binding PreFreezeRows}">
+			<ListBox.Styles>
+				<Style Selector="ListBox.scoreboard ListBoxItem">
+					<Setter Property="Padding" Value="0,5"/>
+					<Setter Property="IsHitTestVisible" Value="False"/>
+				</Style>
+				<Style Selector="ListBox.scoreboard > ListBoxItem:nth-child(odd)">
+					<Setter Property="Background" Value="#1E1E1E"/>
+				</Style>
+			</ListBox.Styles>
+			<ListBox.ItemTemplate>
+				<DataTemplate x:DataType="vm:PreFreezeScoreboardRowViewModel">
+					<Grid ColumnDefinitions="70,110,*,120,140" ShowGridLines="True">
+						<TextBlock Grid.Column="0"
+								   Text="{Binding Rank}"
+								   FontSize="16"
+								   FontWeight="Bold"
+								   Foreground="White"
+								   HorizontalAlignment="Center"
+								   VerticalAlignment="Center" />
+						<Border Grid.Column="1"
+								Width="52"
+								Height="52"
+								CornerRadius="26"
+								Background="#1E1E1E"
+								BorderBrush="#2D2D2D"
+								BorderThickness="0"
+								HorizontalAlignment="Center"
+								VerticalAlignment="Center"
+								ClipToBounds="True">
+							<Image Source="{Binding TeamLogoImage}" Stretch="UniformToFill" />
+						</Border>
+						<StackPanel Grid.Column="2"
+									Orientation="Vertical"
+									VerticalAlignment="Center"
+									Spacing="2">
+							<TextBlock Text="{Binding TeamName}"
+									   Margin="2,0"
+									   FontSize="16"
+									   FontWeight="Bold"
+									   Foreground="White"
+									   TextTrimming="CharacterEllipsis" />
+							<ItemsControl ItemsSource="{Binding ProblemCells}">
+								<ItemsControl.ItemsPanel>
+									<ItemsPanelTemplate>
+										<UniformGrid Rows="1"
+													 Columns="{Binding ProblemCellCount}" />
+									</ItemsPanelTemplate>
+								</ItemsControl.ItemsPanel>
+								<ItemsControl.ItemTemplate>
+									<DataTemplate x:DataType="vm:ProblemStatusCellViewModel">
+										<Border Background="{Binding Background}"
+												CornerRadius="4"
+												Padding="6,2"
+												Margin="2,0,2,0">
+											<TextBlock Text="{Binding Text}"
+													   FontSize="12"
+													   FontWeight="Bold"
+													   Foreground="White"
+													   HorizontalAlignment="Center"
+													   VerticalAlignment="Center" />
+										</Border>
+									</DataTemplate>
+								</ItemsControl.ItemTemplate>
+							</ItemsControl>
+						</StackPanel>
+						<TextBlock Grid.Column="3"
+								   Text="{Binding TotalPoints}"
+								   FontSize="16"
+								   FontWeight="Bold"
+								   Foreground="White"
+								   HorizontalAlignment="Center"
+								   VerticalAlignment="Center" />
+						<TextBlock Grid.Column="4"
+								   Text="{Binding TotalPenalty}"
+								   FontSize="16"
+								   FontWeight="Bold"
+								   Foreground="White"
+								   HorizontalAlignment="Center"
+								   VerticalAlignment="Center" />
+					</Grid>
+				</DataTemplate>
+			</ListBox.ItemTemplate>
+		</ListBox>
+	</Grid>
 </UserControl>
