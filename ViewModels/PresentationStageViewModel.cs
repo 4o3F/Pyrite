@@ -20,6 +20,9 @@ public sealed class PresentationStageViewModel : ViewModelBase
     private PyriteConfig _loadedConfig = PyriteConfig.Default();
     private readonly Dictionary<string, Queue<string>> _pendingRevealsByTeamId = new(StringComparer.Ordinal);
     private readonly List<ProblemDisplayInfo> _orderedProblems = [];
+    private string? _pendingResortSolvedTeamId;
+    private MoveUpAnimationRequest? _moveUpAnimationRequest;
+    private long _moveUpAnimationRequestCounter;
     private PresentationRowState _state = PresentationRowState.RowInProgress;
     private double _viewportHeight;
     private double _viewportWidth;
@@ -38,6 +41,13 @@ public sealed class PresentationStageViewModel : ViewModelBase
     public RelayCommand RevealCommand { get; }
     public RelayCommand MoveUpCommand { get; }
     public ObservableCollection<PreFreezeScoreboardRowViewModel> PreFreezeRows { get; } = [];
+    public MoveUpAnimationRequest? MoveUpAnimationRequest
+    {
+        get => _moveUpAnimationRequest;
+        private set => SetProperty(ref _moveUpAnimationRequest, value);
+    }
+    public double RowFlyAnimationSeconds => Math.Max(0.01, _loadedConfig.Presentation.RowFlyAnimationSeconds);
+    public double ScrollAnimationSeconds => Math.Max(0.01, _loadedConfig.Presentation.ScrollAnimationSeconds);
 
     public PresentationRowState State
     {
@@ -98,6 +108,8 @@ public sealed class PresentationStageViewModel : ViewModelBase
 
         _contestState = contestState;
         _loadedConfig = config;
+        OnPropertyChanged(nameof(RowFlyAnimationSeconds));
+        OnPropertyChanged(nameof(ScrollAnimationSeconds));
         _dataPath = dataPath;
         InitializePresentationRows(contestState);
         FocusedRowIndex = FindInitialFocusedRowIndex();
@@ -174,10 +186,12 @@ public sealed class PresentationStageViewModel : ViewModelBase
                     var revealOutcome = RunReveal();
                     if (revealOutcome.NeedResort)
                     {
+                        _pendingResortSolvedTeamId = revealOutcome.SolvedTeamId;
                         State = PresentationRowState.RowInProgressAwaitResort;
                     }
                     else
                     {
+                        _pendingResortSolvedTeamId = null;
                         State = PresentationRowState.RowInProgress;
                     }
                 }
@@ -203,7 +217,8 @@ public sealed class PresentationStageViewModel : ViewModelBase
 
                 break;
             case PresentationRowState.RowInProgressAwaitResort:
-                ResortScoreboard();
+                ResortScoreboard(_pendingResortSolvedTeamId);
+                _pendingResortSolvedTeamId = null;
                 State = PresentationRowState.RowInProgress;
                 break;
             case PresentationRowState.RowCompleteAwardShowing:
@@ -313,7 +328,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
         }
 
         teamRow.RefreshFromSource();
-        return new RevealOutcome(true, solved, solved);
+        return new RevealOutcome(true, solved, solved, solved ? team.TeamId : null);
     }
 
     private bool MoveUp()
@@ -410,7 +425,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
         }
     }
 
-    private void ResortScoreboard()
+    private void ResortScoreboard(string? solvedTeamId)
     {
         if (FocusedRowIndex < 0 || FocusedRowIndex >= PreFreezeRows.Count)
         {
@@ -418,6 +433,12 @@ public sealed class PresentationStageViewModel : ViewModelBase
         }
 
         var preservedIndex = FocusedRowIndex;
+        var oldIndexByTeamId = new Dictionary<string, int>(PreFreezeRows.Count, StringComparer.Ordinal);
+        for (var i = 0; i < PreFreezeRows.Count; i++)
+        {
+            oldIndexByTeamId[PreFreezeRows[i].TeamId] = i;
+        }
+
         var sortedRows = PreFreezeRows.OrderBy(row => row.TeamStatus).ToList();
         for (var targetIndex = 0; targetIndex < sortedRows.Count; targetIndex++)
         {
@@ -452,6 +473,31 @@ public sealed class PresentationStageViewModel : ViewModelBase
                 FocusedRowIndex = clampedIndex;
             }
         }
+
+        if (!string.IsNullOrWhiteSpace(solvedTeamId) &&
+            oldIndexByTeamId.TryGetValue(solvedTeamId, out var oldIndex))
+        {
+            var newIndex = -1;
+            for (var i = 0; i < PreFreezeRows.Count; i++)
+            {
+                if (string.Equals(PreFreezeRows[i].TeamId, solvedTeamId, StringComparison.Ordinal))
+                {
+                    newIndex = i;
+                    break;
+                }
+            }
+
+            if (newIndex >= 0 && newIndex < oldIndex)
+            {
+                _moveUpAnimationRequestCounter += 1;
+                MoveUpAnimationRequest = new MoveUpAnimationRequest(
+                    solvedTeamId,
+                    oldIndex,
+                    newIndex,
+                    _moveUpAnimationRequestCounter);
+            }
+        }
+
         RefreshRanks();
         RevealCommand.NotifyCanExecuteChanged();
         MoveUpCommand.NotifyCanExecuteChanged();
@@ -489,10 +535,12 @@ public sealed class PresentationStageViewModel : ViewModelBase
     }
 }
 
-public readonly record struct RevealOutcome(bool Applied, bool Solved, bool NeedResort)
+public readonly record struct RevealOutcome(bool Applied, bool Solved, bool NeedResort, string? SolvedTeamId)
 {
-    public static RevealOutcome None => new(false, false, false);
+    public static RevealOutcome None => new(false, false, false, null);
 }
+
+public sealed record MoveUpAnimationRequest(string TeamId, int FromIndex, int ToIndex, long RequestId);
 
 public enum PresentationRowState
 {

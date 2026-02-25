@@ -18,12 +18,13 @@
 			</Grid>
 		</Border>
 
-		<ListBox Grid.Row="1"
-				 Classes="scoreboard"
-				 Background="#111111"
-				 BorderThickness="0"
-				 SelectedIndex="{Binding FocusedRowIndex, Mode=OneWay}"
-				 ItemsSource="{Binding PreFreezeRows}">
+		<Grid Grid.Row="1">
+			<ListBox x:Name="ScoreboardList"
+					 Classes="scoreboard"
+					 Background="#111111"
+					 BorderThickness="0"
+					 SelectedIndex="{Binding FocusedRowIndex, Mode=OneWay}"
+					 ItemsSource="{Binding PreFreezeRows}">
 			<ListBox.Styles>
 				<Style Selector="ListBox.scoreboard ListBoxItem">
 					<Setter Property="Padding" Value="0,5"/>
@@ -112,6 +113,11 @@
 					</Grid>
 				</DataTemplate>
 			</ListBox.ItemTemplate>
-		</ListBox>
+			</ListBox>
+			<Canvas x:Name="MoveUpOverlay"
+					IsHitTestVisible="False"
+					ClipToBounds="True"
+					Panel.ZIndex="1000"/>
+		</Grid>
 	</Grid>
 </UserControl>
