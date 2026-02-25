@@ -54,6 +54,13 @@ public partial class PresentationStageView : UserControl
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
+        if (e.Key == Key.F12)
+        {
+            ToggleFullscreen();
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key != Key.Space)
         {
             return;
@@ -66,6 +73,18 @@ public partial class PresentationStageView : UserControl
 
         vm.HandleSpacePressed();
         e.Handled = true;
+    }
+
+    private void ToggleFullscreen()
+    {
+        if (TopLevel.GetTopLevel(this) is not Window window)
+        {
+            return;
+        }
+
+        window.WindowState = window.WindowState == WindowState.FullScreen
+            ? WindowState.Normal
+            : WindowState.FullScreen;
     }
 
     private void OnAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
