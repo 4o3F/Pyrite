@@ -1,10 +1,10 @@
-using System.Linq;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Data.Core.Plugins;
 using Avalonia.Markup.Xaml;
 using Pyrite.ViewModels;
 using Pyrite.Views;
+using System.Linq;
 
 namespace Pyrite;
 

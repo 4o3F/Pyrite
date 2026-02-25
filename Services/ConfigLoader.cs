@@ -1,6 +1,6 @@
+using Pyrite.Models;
 using System;
 using System.IO;
-using Pyrite.Models;
 using Tomlyn;
 using Tomlyn.Model;
 

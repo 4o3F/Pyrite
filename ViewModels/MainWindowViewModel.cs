@@ -1,7 +1,7 @@
-using System;
-using System.Diagnostics;
-using System.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
 
 namespace Pyrite.ViewModels;
 

@@ -22,6 +22,7 @@
 				 Classes="scoreboard"
 				 Background="#111111"
 				 BorderThickness="0"
+				 SelectedIndex="{Binding FocusedRowIndex, Mode=OneWay}"
 				 ItemsSource="{Binding PreFreezeRows}">
 			<ListBox.Styles>
 				<Style Selector="ListBox.scoreboard ListBoxItem">
@@ -30,6 +31,12 @@
 				</Style>
 				<Style Selector="ListBox.scoreboard > ListBoxItem:nth-child(odd)">
 					<Setter Property="Background" Value="#1E1E1E"/>
+				</Style>
+				<Style Selector="ListBox.scoreboard > ListBoxItem:selected">
+					<Setter Property="Background" Value="#A7D8FF"/>
+				</Style>
+				<Style Selector="ListBox.scoreboard > ListBoxItem:selected:nth-child(odd)">
+					<Setter Property="Background" Value="#A7D8FF"/>
 				</Style>
 			</ListBox.Styles>
 			<ListBox.ItemTemplate>

@@ -1,10 +1,10 @@
+using Pyrite.Models;
+using Pyrite.Services;
 using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Pyrite.Models;
-using Pyrite.Services;
 
 namespace Pyrite.ViewModels;
 

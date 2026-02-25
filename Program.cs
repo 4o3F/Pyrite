@@ -1,7 +1,7 @@
+using Avalonia;
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Avalonia;
 
 namespace Pyrite;
 
