@@ -158,7 +158,7 @@ public class MainWindowViewModel : ViewModelBase
         var contestState = LoadDataStage.LoadedContestState;
         if (contestState is null) return;
         Trace.WriteLine(
-            $"[MainWindowViewModel] {DateTime.Now:HH:mm:ss.fff} LaunchPresentation: " +
+            $"[MainWindowVM] LaunchPresentation: ts={DateTime.Now:HH:mm:ss.fff}, " +
             $"teams={contestState.Teams.Count}, preFreeze={contestState.LeaderboardPreFreeze.Count}, " +
             $"finalized={contestState.LeaderboardFinalized.Count}, problems={contestState.Problems.Count}");
 

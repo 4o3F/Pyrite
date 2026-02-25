@@ -168,13 +168,13 @@ public sealed class PresentationStageViewModel : ViewModelBase
         // Template for your transition logic:
         // - decide next state
         // - decide whether to call Reveal or MoveUp
-        Trace.WriteLine($"Current state {State} focused on {FocusedRowIndex}");
+        Trace.WriteLine($"[PresentationStageVM] StateBefore: state={State}, focusIndex={FocusedRowIndex}");
         switch (State)
         {
             case PresentationRowState.RowInProgress:
                 if (FocusedRowIndex < 0 || FocusedRowIndex >= PreFreezeRows.Count)
                 {
-                    Trace.WriteLine($"ERROR: FocusedRowIndex {FocusedRowIndex} PreFreezeRows Count {PreFreezeRows.Count}");
+                    Trace.WriteLine($"[PresentationStageVM] InvalidFocusIndex: focusIndex={FocusedRowIndex}, rowCount={PreFreezeRows.Count}");
                     State = PresentationRowState.RowInProgress;
                     break;
                 }
@@ -182,7 +182,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
                 var teamId = PreFreezeRows[FocusedRowIndex].TeamId;
                 if (HasPendingReveal(teamId))
                 {
-                    Trace.WriteLine($"Do reveal on FocusedRowIndex {FocusedRowIndex}");
+                    Trace.WriteLine($"[PresentationStageVM] Action: reveal, focusIndex={FocusedRowIndex}");
                     var revealOutcome = RunReveal();
                     if (revealOutcome.NeedResort)
                     {
@@ -200,7 +200,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
                     // Team has no pending reveals, finished
                     if (!HasPendingReveal(teamId))
                     {
-                        Trace.WriteLine($"Team rank {FocusedRowIndex} has no more to reveal");
+                        Trace.WriteLine($"[PresentationStageVM] TeamNoPendingReveal: focusIndex={FocusedRowIndex}");
                         if (HasAwards(teamId))
                         {
                             // Team has award, show it
@@ -208,7 +208,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
                         }
                         else
                         {
-                            Trace.WriteLine($"Execute MoveUp");
+                            Trace.WriteLine("[PresentationStageVM] Action: move_up");
                             RunMoveUp();
                             State = PresentationRowState.RowInProgress;
                         }
@@ -232,7 +232,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
             default:
                 throw new ArgumentOutOfRangeException();
         }
-        Trace.WriteLine($"New state {State}");
+        Trace.WriteLine($"[PresentationStageVM] StateAfter: state={State}");
     }
 
     private void RequestExit()
@@ -339,7 +339,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
         }
 
         FocusedRowIndex -= 1;
-        Trace.WriteLine($"Moved up to {FocusedRowIndex}");
+        Trace.WriteLine($"[PresentationStageVM] MoveUpApplied: newFocusIndex={FocusedRowIndex}");
         return true;
     }
 
@@ -606,7 +606,8 @@ public sealed class PreFreezeScoreboardRowViewModel : ViewModelBase
             string.IsNullOrWhiteSpace(teamAffiliation) ||
             string.IsNullOrWhiteSpace(logoExtension))
         {
-            Trace.WriteLine($"CDP Path {cdpPath} Team Affiliation {teamAffiliation} LOGO Extension {logoExtension}");
+            Trace.WriteLine(
+                $"[PreFreezeRowVM] LogoPathInputsMissing: cdpPath={cdpPath}, teamAffiliation={teamAffiliation}, logoExtension={logoExtension}");
             return null;
         }
 
