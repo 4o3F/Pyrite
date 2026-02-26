@@ -1,9 +1,21 @@
-﻿using Avalonia;
+using Avalonia;
+using Avalonia.Media;
+using Avalonia.Media.Fonts;
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace Pyrite;
+
+internal sealed class AppFontCollection : EmbeddedFontCollection
+{
+    public AppFontCollection()
+        : base(
+            new Uri("fonts:app", UriKind.Absolute),
+            new Uri("avares://Pyrite/Assets", UriKind.Absolute))
+    {
+    }
+}
 
 internal sealed class Program
 {
@@ -36,7 +48,14 @@ internal sealed class Program
     {
         return AppBuilder.Configure<App>()
             .UsePlatformDetect()
-            .WithInterFont()
+            .With(new FontManagerOptions
+            {
+                DefaultFamilyName = "fonts:app#Noto Sans CJK SC"
+            })
+            .ConfigureFonts(fontManager =>
+            {
+                fontManager.AddFontCollection(new AppFontCollection());
+            })
             .LogToTrace();
     }
 }
