@@ -5,3 +5,4 @@ obj
 *.user
 .dotnet
 out
+Native

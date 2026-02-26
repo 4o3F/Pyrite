@@ -1,31 +1,47 @@
-<Project Sdk="Microsoft.NET.Sdk">
-    <PropertyGroup>
-        <OutputType>WinExe</OutputType>
-        <TargetFramework>net10.0</TargetFramework>
-        <Nullable>enable</Nullable>
-        <ApplicationManifest>app.manifest</ApplicationManifest>
-        <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ApplicationManifest>app.manifest</ApplicationManifest>
+		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
 		<PublishAot>true</PublishAot>
 		<BuiltInComInteropSupport>false</BuiltInComInteropSupport>
-    </PropertyGroup>
+		<TrimMode>full</TrimMode>
+	</PropertyGroup>
 
-    <ItemGroup>
-        <Folder Include="Models\" />
-        <AvaloniaResource Include="Assets\**" />
-    </ItemGroup>
+	<ItemGroup>
+		<Folder Include="Models\" />
+		<Folder Include="Native\" />
+	</ItemGroup>
 
-    <ItemGroup>
-        <PackageReference Include="Avalonia" Version="11.3.12" />
-        <PackageReference Include="Avalonia.Desktop" Version="11.3.12" />
-        <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.12" />
-        <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.12" />
-        <!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
-        <PackageReference Include="Avalonia.Diagnostics" Version="11.3.12">
-            <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
-            <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
-        </PackageReference>
-        <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.1" />
-        <PackageReference Include="Tomlyn" Version="0.20.0" />
-        <PackageReference Include="HotAvalonia" Version="3.*" PrivateAssets="All" Publish="True" />
-    </ItemGroup>
+	<ItemGroup>
+		<AvaloniaResource Include="Assets\**" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Avalonia" Version="11.3.12" />
+		<PackageReference Include="Avalonia.Desktop" Version="11.3.12" />
+		<PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.12" />
+		<PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.12" />
+		<!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
+		<PackageReference Include="Avalonia.Diagnostics" Version="11.3.12">
+			<IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
+			<PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
+		</PackageReference>
+		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+		<PackageReference Include="Tomlyn" Version="0.20.0" />
+		<PackageReference Include="HotAvalonia" Version="3.*" PrivateAssets="All" Publish="True" />
+	</ItemGroup>
+
+
+	<ItemGroup Label="ImportLib">
+		<DirectPInvoke Include="libHarfBuzzSharp" />
+		<NativeLibrary Include="Native\libHarfBuzzSharp.lib" Condition="$(RuntimeIdentifier.StartsWith('win'))" />
+		<DirectPInvoke Include="libSkiaSharp" />
+		<NativeLibrary Include="Native\skia.lib" Condition="$(RuntimeIdentifier.StartsWith('win'))" />
+		<NativeLibrary Include="Native\SkiaSharp.lib" Condition="$(RuntimeIdentifier.StartsWith('win'))" />
+		<DirectPInvoke Include="av_libglesv2" />
+		<NativeLibrary Include="Native\av_libglesv2.lib" Condition="$(RuntimeIdentifier.StartsWith('win'))" />
+	</ItemGroup>
 </Project>
