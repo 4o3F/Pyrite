@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -25,11 +26,6 @@ public sealed class ParseResult
 
 public static class EventFeedParser
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
-
     public static async Task<ParseResult> ParseAsync(
         string eventFeedPath,
         PyriteConfig config,
@@ -108,7 +104,7 @@ public static class EventFeedParser
         Event? parsedEvent;
         try
         {
-            parsedEvent = JsonSerializer.Deserialize<Event>(line, JsonOptions);
+            parsedEvent = JsonSerializer.Deserialize(line, EventFeedJsonContext.Default.Event);
         }
         catch (Exception ex)
         {
@@ -133,31 +129,40 @@ public static class EventFeedParser
                 TryParseContest(eventData, lineNumber, state, errors);
                 break;
             case EventType.JudgementTypes:
-                HandleEvent(eventData, lineNumber, state.JudgementTypes, contestDefined, errors, "judgement-types");
+                HandleEvent(eventData, lineNumber, state.JudgementTypes, contestDefined, errors, "judgement-types",
+                    EventFeedJsonContext.Default.JudgementType);
                 break;
             case EventType.Groups:
-                HandleEvent(eventData, lineNumber, state.Groups, contestDefined, errors, "groups");
+                HandleEvent(eventData, lineNumber, state.Groups, contestDefined, errors, "groups",
+                    EventFeedJsonContext.Default.Group);
                 break;
             case EventType.Organizations:
-                HandleEvent(eventData, lineNumber, state.Organizations, contestDefined, errors, "organizations");
+                HandleEvent(eventData, lineNumber, state.Organizations, contestDefined, errors, "organizations",
+                    EventFeedJsonContext.Default.Organization);
                 break;
             case EventType.Teams:
-                HandleEvent(eventData, lineNumber, state.Teams, contestDefined, errors, "teams");
+                HandleEvent(eventData, lineNumber, state.Teams, contestDefined, errors, "teams",
+                    EventFeedJsonContext.Default.Team);
                 break;
             case EventType.Accounts:
-                HandleEvent(eventData, lineNumber, state.Accounts, contestDefined, errors, "accounts");
+                HandleEvent(eventData, lineNumber, state.Accounts, contestDefined, errors, "accounts",
+                    EventFeedJsonContext.Default.Account);
                 break;
             case EventType.Problems:
-                HandleEvent(eventData, lineNumber, state.Problems, contestDefined, errors, "problems");
+                HandleEvent(eventData, lineNumber, state.Problems, contestDefined, errors, "problems",
+                    EventFeedJsonContext.Default.Problem);
                 break;
             case EventType.Submissions:
-                HandleEvent(eventData, lineNumber, state.Submissions, contestDefined, errors, "submissions");
+                HandleEvent(eventData, lineNumber, state.Submissions, contestDefined, errors, "submissions",
+                    EventFeedJsonContext.Default.Submission);
                 break;
             case EventType.Judgements:
-                HandleEvent(eventData, lineNumber, state.Judgements, contestDefined, errors, "judgements");
+                HandleEvent(eventData, lineNumber, state.Judgements, contestDefined, errors, "judgements",
+                    EventFeedJsonContext.Default.Judgement);
                 break;
             case EventType.Awards:
-                HandleEvent(eventData, lineNumber, state.Awards, contestDefined, errors, "awards");
+                HandleEvent(eventData, lineNumber, state.Awards, contestDefined, errors, "awards",
+                    EventFeedJsonContext.Default.Award);
                 break;
             case EventType.Languages:
             case EventType.Runs:
@@ -175,7 +180,7 @@ public static class EventFeedParser
     {
         try
         {
-            var contest = eventData.Deserialize<Contest>(JsonOptions);
+            var contest = eventData.Deserialize(EventFeedJsonContext.Default.Contest);
             if (contest is null)
             {
                 AddLineError(errors, lineNumber, "Empty contest payload");
@@ -200,7 +205,8 @@ public static class EventFeedParser
         Dictionary<string, T> stateMap,
         bool contestDefined,
         List<string> errors,
-        string eventName)
+        string eventName,
+        JsonTypeInfo<T> typeInfo)
         where T : class, IHasId
     {
         if (!contestDefined)
@@ -211,7 +217,7 @@ public static class EventFeedParser
 
         try
         {
-            var item = eventData.Deserialize<T>(JsonOptions);
+            var item = eventData.Deserialize(typeInfo);
             if (item is null)
             {
                 AddLineError(errors, lineNumber, $"Empty {eventName} payload");

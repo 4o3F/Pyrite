@@ -13,12 +13,6 @@ namespace Pyrite.ViewModels;
 
 public sealed class SetMedalStageViewModel : ViewModelBase
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        WriteIndented = true
-    };
-
     private ContestState? _contestState;
     private int _eligibleTeamCount;
     private string _finalizedCacheKey = string.Empty;
@@ -185,7 +179,7 @@ public sealed class SetMedalStageViewModel : ViewModelBase
     {
         if (!TryGetContestState(out var contestState)) return;
 
-        var json = JsonSerializer.Serialize(contestState.Awards, JsonOptions);
+        var json = JsonSerializer.Serialize(contestState.Awards, SetMedalJsonContext.Default.DictionaryStringAward);
         File.WriteAllText(path, json);
         StatusMessage = $"Saved medals to {path}";
     }
@@ -195,7 +189,7 @@ public sealed class SetMedalStageViewModel : ViewModelBase
         if (!TryGetContestState(out var contestState)) return;
 
         var raw = File.ReadAllText(path);
-        var parsed = JsonSerializer.Deserialize<Dictionary<string, Award>>(raw, JsonOptions);
+        var parsed = JsonSerializer.Deserialize(raw, SetMedalJsonContext.Default.DictionaryStringAward);
         if (parsed is null) throw new InvalidOperationException("Medals JSON was empty.");
 
         var normalized = new Dictionary<string, Award>(StringComparer.Ordinal);
@@ -445,7 +439,7 @@ public sealed class SetMedalStageViewModel : ViewModelBase
     {
         var dumpPath = Path.Combine("logs", "contest_state_before_present.json");
         Directory.CreateDirectory("logs");
-        var json = JsonSerializer.Serialize(contestState, JsonOptions);
+        var json = JsonSerializer.Serialize(contestState, SetMedalJsonContext.Default.ContestState);
         File.WriteAllText(dumpPath, json);
         return $"Dumped contest state to {dumpPath}";
     }

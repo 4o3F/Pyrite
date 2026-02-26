@@ -6,7 +6,7 @@ using System.Text.Json.Serialization;
 
 namespace Pyrite.Models;
 
-[JsonConverter(typeof(JsonStringEnumConverter))]
+[JsonConverter(typeof(JsonStringEnumConverter<EventType>))]
 public enum EventType
 {
     [JsonStringEnumMemberName("contest")] Contest,

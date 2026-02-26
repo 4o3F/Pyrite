@@ -5,6 +5,8 @@
         <Nullable>enable</Nullable>
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+		<PublishAot>true</PublishAot>
+		<BuiltInComInteropSupport>false</BuiltInComInteropSupport>
     </PropertyGroup>
 
     <ItemGroup>
