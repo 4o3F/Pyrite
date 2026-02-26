@@ -1,12 +1,12 @@
 # Pyrite
-A fast, memory saving ICPC contest resolver for DomJudge.
-Designed after being tortured by the ICPC Tool.
+A fast, memory-efficient ICPC contest resolver for DomJudge.
+Created after being thoroughly tortured by the ICPC Tool.
 > [!CAUTION]
-> This program is still experimental, use in production at your own risk
+> This program is still experimental. Use it in production at your own risk.
 
 ## Usage
-Download the binary from release first.  It should be self contained and click to run.  
-The program require a CDP (Contest Data Path) to run, example structure is as follow.
+First, download the binary from the Releases page. It is fully self-contained and can be run directly.  
+The program requires a **CDP (Contest Data Path)** to operate. An example directory structure is shown below:
 ```
 .
 ├── affiliations
@@ -20,20 +20,27 @@ The program require a CDP (Contest Data Path) to run, example structure is as fo
     ├── ....
     └── team417.jpg
 ```
-use GUI to set CDP path, let the program auto validate and parse the event feeds. 
+Use the GUI to set the CDP path. The program will automatically validate the structure and parse the event feed.
 
 > [!TIP]  
-> The config file is optional, which can be used to define several behavior and some post processing of event feed (to fix broken event feed, use issue for new post processing feature request).
+> The `config.toml` file is optional. It can be used to customize behavior and apply post-processing to the event feed (for example, to fix malformed data). If you need additional post-processing features, please open an issue.
 
-Then set the awards inside GUI, `Gold`, `Silver`, `Bronze` medal winning team will be visualized, check before proceeding, there's no way back if presentation is launched.
+Next, configure the awards in the GUI. The `Gold`, `Silver`, and `Bronze` medal-winning teams will be visualized for review. Make sure to double-check everything before proceeding, once the presentation starts, it cannot be undone.
 
 > [!NOTE]  
-> The category selection will also be used in resolver presentation, so remember to uncheck groups like `Star`
+> The selected categories will also be used during the resolver presentation. Be sure to uncheck groups such as `Star` if they should not be included.
 
-When resolve presentation is launched, pressing `F12` can toggle full screen, animation speed is configured inside config files and do not support on flight changes, so remember to do tests before presentation. Pressing `Space` will advance the resolve process.
+When the resolver presentation is running:
+
+* Press `F12` to toggle full screen.
+* Press `Space` to advance the resolution process.
+
+Animation speed is configured in the `config.toml` file and cannot be changed during the presentation. Be sure to test everything beforehand.
 
 ## Build
-For total static AOT build, place following static libraries inside `Native` to link.
-+ https://github.com/2ndlab/ANGLE.Static
-+ https://github.com/2ndlab/SkiaSharp.Static
-Then it should be fully self contained.
+For a fully static AOT build, place the following static libraries inside the `Native` directory for linking:
+
+* [https://github.com/2ndlab/ANGLE.Static](https://github.com/2ndlab/ANGLE.Static)
+* [https://github.com/2ndlab/SkiaSharp.Static](https://github.com/2ndlab/SkiaSharp.Static)
+
+After that, the build should be completely self-contained.
