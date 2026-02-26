@@ -39,7 +39,14 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Publish (hosted)
+      - name: Install NativeAOT dependencies (Ubuntu)
+        if: ${{ !matrix.archlinux && startsWith(matrix.os, 'ubuntu') }}
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
+      - name: Publish AOT (hosted)
         if: ${{ !matrix.archlinux }}
         shell: pwsh
         run: |
@@ -48,7 +55,7 @@ jobs:
             -c Release `
             -r "${{ matrix.rid }}" `
             --self-contained true `
-            -p:PublishAot=false `
+            -p:PublishAot=true `
             -o $publishDir
 
       - name: Compress publish output (hosted)
@@ -56,12 +63,17 @@ jobs:
         shell: pwsh
         run: |
           $artifactRoot = Join-Path $env:GITHUB_WORKSPACE "artifacts"
-          $publishDir = Join-Path $artifactRoot "publish-${{ matrix.name }}"
           $zipPath = Join-Path $artifactRoot "pyrite-${{ matrix.name }}.zip"
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-          Compress-Archive -Path "$publishDir/*" -DestinationPath $zipPath
 
-      - name: Publish and compress (archlinux via Docker)
+          Push-Location $artifactRoot
+          try {
+            Compress-Archive -Path "publish-${{ matrix.name }}" -DestinationPath $zipPath
+          } finally {
+            Pop-Location
+          }
+
+      - name: Publish AOT and compress (archlinux via Docker)
         if: ${{ matrix.archlinux }}
         shell: bash
         run: |
@@ -73,13 +85,13 @@ jobs:
             archlinux:latest \
             /bin/bash -lc '
               set -euo pipefail
-              pacman -Sy --noconfirm --needed curl tar gzip zip ca-certificates dotnet-sdk
+              pacman -Sy --noconfirm --needed curl tar gzip zip ca-certificates dotnet-sdk clang zlib
               publish_dir="/workspace/artifacts/publish-archlinux-x64"
               dotnet publish Pyrite.csproj \
                 -c Release \
                 -r linux-x64 \
                 --self-contained true \
-                -p:PublishAot=false \
+                -p:PublishAot=true \
                 -o "$publish_dir"
               cd /workspace/artifacts
               zip -r "pyrite-archlinux-x64.zip" "publish-archlinux-x64"
