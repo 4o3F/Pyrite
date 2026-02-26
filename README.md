@@ -37,6 +37,10 @@ When the resolver presentation is running:
 
 Animation speed is configured in the `config.toml` file and cannot be changed during the presentation. Be sure to test everything beforehand.
 
+Main logic is shown as following state machine.
+
+![presentation flow](Docs/presentation_workflow.svg)
+
 ## Build
 For a fully static AOT build, place the following static libraries inside the `Native` directory for linking:
 

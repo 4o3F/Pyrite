@@ -34,7 +34,7 @@
 		<PackageReference Include="HotAvalonia" Version="3.*" PrivateAssets="All" Publish="True" />
 	</ItemGroup>
 
-
+	<!-- Remove comment for AOT publish
 	<ItemGroup Label="ImportLib">
 		<DirectPInvoke Include="libHarfBuzzSharp" />
 		<NativeLibrary Include="Native\libHarfBuzzSharp.lib" Condition="$(RuntimeIdentifier.StartsWith('win'))" />
@@ -44,4 +44,5 @@
 		<DirectPInvoke Include="av_libglesv2" />
 		<NativeLibrary Include="Native\av_libglesv2.lib" Condition="$(RuntimeIdentifier.StartsWith('win'))" />
 	</ItemGroup>
+	-->
 </Project>
