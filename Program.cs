@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -19,7 +19,10 @@ internal sealed class Program
     public static void Main(string[] args)
     {
         // Bind stdout/stderr to `dotnet run` console for runtime logs.
-        _ = AttachConsole(AttachParentProcess);
+        if (OperatingSystem.IsWindows())
+        {
+            _ = AttachConsole(AttachParentProcess);
+        }
 
         Trace.Listeners.Add(new ConsoleTraceListener());
         Trace.AutoFlush = true;
