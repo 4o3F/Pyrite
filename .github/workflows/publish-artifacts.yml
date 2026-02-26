@@ -1,0 +1,93 @@
+name: Publish Artifacts
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            rid: win-x64
+            archlinux: false
+          - name: ubuntu-x64
+            os: ubuntu-latest
+            rid: linux-x64
+            archlinux: false
+          - name: archlinux-x64
+            os: ubuntu-latest
+            rid: linux-x64
+            archlinux: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        if: ${{ !matrix.archlinux }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish (hosted)
+        if: ${{ !matrix.archlinux }}
+        shell: pwsh
+        run: |
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE "artifacts/publish-${{ matrix.name }}"
+          dotnet publish Pyrite.csproj `
+            -c Release `
+            -r "${{ matrix.rid }}" `
+            --self-contained true `
+            -p:PublishAot=false `
+            -o $publishDir
+
+      - name: Compress publish output (hosted)
+        if: ${{ !matrix.archlinux }}
+        shell: pwsh
+        run: |
+          $artifactRoot = Join-Path $env:GITHUB_WORKSPACE "artifacts"
+          $publishDir = Join-Path $artifactRoot "publish-${{ matrix.name }}"
+          $zipPath = Join-Path $artifactRoot "pyrite-${{ matrix.name }}.zip"
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Compress-Archive -Path "$publishDir/*" -DestinationPath $zipPath
+
+      - name: Publish and compress (archlinux via Docker)
+        if: ${{ matrix.archlinux }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -w /workspace \
+            archlinux:latest \
+            /bin/bash -lc '
+              set -euo pipefail
+              pacman -Sy --noconfirm --needed curl tar gzip zip ca-certificates dotnet-sdk
+              publish_dir="/workspace/artifacts/publish-archlinux-x64"
+              dotnet publish Pyrite.csproj \
+                -c Release \
+                -r linux-x64 \
+                --self-contained true \
+                -p:PublishAot=false \
+                -o "$publish_dir"
+              cd /workspace/artifacts
+              zip -r "pyrite-archlinux-x64.zip" "publish-archlinux-x64"
+            '
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyrite-${{ matrix.name }}
+          path: artifacts/pyrite-${{ matrix.name }}.zip
+          if-no-files-found: error
