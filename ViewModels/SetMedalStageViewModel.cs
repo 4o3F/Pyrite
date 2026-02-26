@@ -216,9 +216,9 @@ public sealed class SetMedalStageViewModel : ViewModelBase
 
         try
         {
-            var dumpMessage = DumpContestStateBeforePresentation(contestState);
+            //var dumpMessage = DumpContestStateBeforePresentation(contestState);
             var filterMessage = ApplyGroupFilterForPresentation(contestState);
-            StatusMessage = $"{dumpMessage}; {filterMessage}";
+            StatusMessage = $"{filterMessage}";
             _finalizedCacheKey = string.Empty;
             _finalizedLeaderboard = [];
             RefreshMedals();
@@ -433,15 +433,6 @@ public sealed class SetMedalStageViewModel : ViewModelBase
 
             Medals.Add(new MedalSummaryItem(medal.Id, medal.Citation, medal.TeamIds.Count, preview));
         }
-    }
-
-    private static string DumpContestStateBeforePresentation(ContestState contestState)
-    {
-        var dumpPath = Path.Combine("logs", "contest_state_before_present.json");
-        Directory.CreateDirectory("logs");
-        var json = JsonSerializer.Serialize(contestState, SetMedalJsonContext.Default.ContestState);
-        File.WriteAllText(dumpPath, json);
-        return $"Dumped contest state to {dumpPath}";
     }
 
     private string ApplyGroupFilterForPresentation(ContestState contestState)

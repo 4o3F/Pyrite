@@ -49,7 +49,12 @@ public partial class PresentationStageView : UserControl
         AttachedToVisualTree += OnAttachedToVisualTree;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
         PointerPressed += (_, _) => Focus();
-        ScoreboardList.SizeChanged += (_, _) => RequestFocusedRowAnchor();
+        SizeChanged += OnViewSizeChanged;
+        ScoreboardList.SizeChanged += (_, _) =>
+        {
+            SyncViewportToViewModel();
+            RequestFocusedRowAnchor();
+        };
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
@@ -90,6 +95,7 @@ public partial class PresentationStageView : UserControl
     private void OnAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
         Focus();
+        SyncViewportToViewModel();
         RequestFocusedRowAnchor();
     }
 
@@ -126,7 +132,47 @@ public partial class PresentationStageView : UserControl
             SetAwardOverlayVisibilityImmediate(false);
         }
 
+        SyncViewportToViewModel();
         RequestFocusedRowAnchor();
+    }
+
+    private void OnViewSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        SyncViewportToViewModel();
+    }
+
+    private void SyncViewportToViewModel()
+    {
+        if (DataContext is not PresentationStageViewModel vm)
+        {
+            return;
+        }
+
+        var scrollViewer = ScoreboardList.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        var viewportWidth = scrollViewer?.Viewport.Width ?? 0;
+        var viewportHeight = scrollViewer?.Viewport.Height ?? 0;
+        var totalHeight = scrollViewer?.Extent.Height ?? 0;
+
+        if (viewportWidth <= 0 || viewportHeight <= 0)
+        {
+            viewportWidth = ScoreboardList.Bounds.Width;
+            viewportHeight = ScoreboardList.Bounds.Height;
+            totalHeight = Math.Max(totalHeight, ScoreboardList.Bounds.Height);
+        }
+
+        if (viewportWidth <= 0 || viewportHeight <= 0)
+        {
+            viewportWidth = Bounds.Width;
+            viewportHeight = Bounds.Height;
+            totalHeight = Math.Max(totalHeight, Bounds.Height);
+        }
+
+        if (viewportWidth <= 0 || viewportHeight <= 0)
+        {
+            return;
+        }
+
+        vm.UpdateViewport(viewportWidth, viewportHeight, totalHeight);
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

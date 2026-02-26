@@ -4,6 +4,7 @@ using Avalonia.Data.Core.Plugins;
 using Avalonia.Markup.Xaml;
 using Pyrite.ViewModels;
 using Pyrite.Views;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 
 namespace Pyrite;
@@ -31,6 +32,10 @@ public class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "Avalonia startup plugin cleanup is intentionally used for data validation behavior.")]
     private void DisableAvaloniaDataAnnotationValidation()
     {
         // Get an array of plugins to remove

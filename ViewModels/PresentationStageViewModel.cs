@@ -13,11 +13,19 @@ namespace Pyrite.ViewModels;
 
 public sealed class PresentationStageViewModel : ViewModelBase
 {
-    private static readonly Dictionary<string, Bitmap?> ImageCache = new(StringComparer.OrdinalIgnoreCase);
+    private const int AwardBackgroundDecodeFallbackWidth = 1920;
+    private const int AwardBackgroundDecodeMinWidth = 1280;
+    private const int AwardBackgroundDecodeMaxWidth = 2560;
+    private const double AwardBackgroundDecodeViewportScale = 1.2;
+    private const int ScoreboardLogoDecodeWidth = 96;
+    private const int AwardAffiliationLogoDecodeWidth = 256;
+    private const int MaxLogoCacheItems = 512;
+    private const long MaxLogoCacheApproxBytes = 64L * 1024 * 1024;
+
     private ContestState? _contestState;
+    private readonly BoundedBitmapCache _logoCache = new(MaxLogoCacheItems, MaxLogoCacheApproxBytes);
     private Bitmap? _awardAffiliationLogoImage;
     private Bitmap? _awardBackgroundImage;
-    private bool _awardBackgroundImageOwned;
     private string _awardTeamName = string.Empty;
     private string _awardText = string.Empty;
     private string? _dataPath;
@@ -61,11 +69,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
         get => _isAwardOverlayVisible;
         private set => SetProperty(ref _isAwardOverlayVisible, value);
     }
-    public Bitmap? AwardBackgroundImage
-    {
-        get => _awardBackgroundImage;
-        private set => SetProperty(ref _awardBackgroundImage, value);
-    }
+    public Bitmap? AwardBackgroundImage => _awardBackgroundImage;
     public Bitmap? AwardAffiliationLogoImage
     {
         get => _awardAffiliationLogoImage;
@@ -144,6 +148,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
         OnPropertyChanged(nameof(RowFlyAnimationSeconds));
         OnPropertyChanged(nameof(ScrollAnimationSeconds));
         HideAwardOverlay();
+        _logoCache.Clear();
         _dataPath = dataPath;
         InitializePresentationRows(contestState);
         FocusedRowIndex = FindInitialFocusedRowIndex();
@@ -300,12 +305,12 @@ public sealed class PresentationStageViewModel : ViewModelBase
 
             _pendingRevealsByTeamId[team.TeamId] = new Queue<string>(pendingProblemIds);
 
+            var teamLogo = LoadPinnedLogo(BuildAffiliationLogoPath(team.TeamAffiliation), ScoreboardLogoDecodeWidth);
             var rowVm = new PreFreezeScoreboardRowViewModel(
                 team,
                 i + 1,
                 _orderedProblems,
-                _dataPath,
-                _loadedConfig.Presentation.LogoExtension);
+                teamLogo);
             PreFreezeRows.Add(rowVm);
         }
     }
@@ -467,9 +472,8 @@ public sealed class PresentationStageViewModel : ViewModelBase
 
         AwardTeamName = teamName ?? teamId;
         AwardText = BuildAwardText(teamId);
-        AwardBackgroundImage = LoadImageUncached(BuildTeamPhotoPath(teamId));
-        _awardBackgroundImageOwned = AwardBackgroundImage is not null;
-        AwardAffiliationLogoImage = LoadImage(BuildAffiliationLogoPath(teamAffiliation));
+        SetAwardBackgroundImage(LoadAwardBackgroundImage(BuildTeamPhotoPath(teamId)));
+        AwardAffiliationLogoImage = LoadLogoImage(BuildAffiliationLogoPath(teamAffiliation), AwardAffiliationLogoDecodeWidth);
         IsAwardOverlayVisible = true;
         Trace.WriteLine(
             $"[PresentationStageVM] AwardOverlayShow: teamId={teamId}, teamName={AwardTeamName}, hasPhoto={AwardBackgroundImage is not null}, hasAffiliationLogo={AwardAffiliationLogoImage is not null}");
@@ -477,22 +481,11 @@ public sealed class PresentationStageViewModel : ViewModelBase
 
     private void HideAwardOverlay()
     {
-        if (_awardBackgroundImageOwned && AwardBackgroundImage is not null)
-        {
-            AwardBackgroundImage.Dispose();
-        }
-
         IsAwardOverlayVisible = false;
-        AwardBackgroundImage = null;
-        _awardBackgroundImageOwned = false;
+        SetAwardBackgroundImage(null);
         AwardAffiliationLogoImage = null;
         AwardTeamName = string.Empty;
         AwardText = string.Empty;
-
-        // Award photos are large and each team is shown once; collect promptly after dismissal.
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        GC.Collect();
     }
 
     private string BuildAwardText(string teamId)
@@ -584,38 +577,63 @@ public sealed class PresentationStageViewModel : ViewModelBase
         return File.Exists(candidatePath) ? candidatePath : null;
     }
 
-    private static Bitmap? LoadImage(string? path)
+    private int CalculateAwardBackgroundDecodeWidth()
+    {
+        if (_viewportWidth <= 0)
+        {
+            return AwardBackgroundDecodeFallbackWidth;
+        }
+
+        var scaledWidth = (int)Math.Round(
+            _viewportWidth * AwardBackgroundDecodeViewportScale,
+            MidpointRounding.AwayFromZero);
+        return Math.Clamp(scaledWidth, AwardBackgroundDecodeMinWidth, AwardBackgroundDecodeMaxWidth);
+    }
+
+    private Bitmap? LoadAwardBackgroundImage(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
             return null;
         }
 
-        if (ImageCache.TryGetValue(path, out var cached))
+        return LoadBitmapDecodedToWidth(path, CalculateAwardBackgroundDecodeWidth());
+    }
+
+    private Bitmap? LoadPinnedLogo(string? path, int decodeWidth)
+    {
+        return _logoCache.GetOrAdd(path, decodeWidth, pin: true, LoadBitmapDecodedToWidth);
+    }
+
+    private Bitmap? LoadLogoImage(string? path, int decodeWidth)
+    {
+        return _logoCache.GetOrAdd(path, decodeWidth, pin: false, LoadBitmapDecodedToWidth);
+    }
+
+    private void SetAwardBackgroundImage(Bitmap? newImage)
+    {
+        if (ReferenceEquals(_awardBackgroundImage, newImage))
         {
-            return cached;
+            return;
         }
 
-        var bitmap = LoadBitmap(path);
-        ImageCache[path] = bitmap;
-        return bitmap;
+        var previous = _awardBackgroundImage;
+        _awardBackgroundImage = newImage;
+        OnPropertyChanged(nameof(AwardBackgroundImage));
+        previous?.Dispose();
     }
 
-    private static Bitmap? LoadImageUncached(string? path)
+    private static Bitmap? LoadBitmapDecodedToWidth(string path, int decodeWidth)
     {
-        return LoadBitmap(path);
-    }
-
-    private static Bitmap? LoadBitmap(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
+        if (string.IsNullOrWhiteSpace(path) || decodeWidth <= 0)
         {
             return null;
         }
 
         try
         {
-            return new Bitmap(path);
+            using var stream = File.OpenRead(path);
+            return Bitmap.DecodeToWidth(stream, decodeWidth, BitmapInterpolationMode.MediumQuality);
         }
         catch
         {
@@ -739,6 +757,115 @@ public sealed class PresentationStageViewModel : ViewModelBase
             LastSubmissionTime = source.LastSubmissionTime
         };
     }
+
+    private sealed class BoundedBitmapCache
+    {
+        private readonly int _maxItems;
+        private readonly long _maxApproxBytes;
+        private readonly Dictionary<string, LinkedListNode<CacheEntry>> _entries = new(StringComparer.OrdinalIgnoreCase);
+        private readonly LinkedList<CacheEntry> _lru = new();
+        private long _currentApproxBytes;
+
+        internal BoundedBitmapCache(int maxItems, long maxApproxBytes)
+        {
+            _maxItems = Math.Max(1, maxItems);
+            _maxApproxBytes = Math.Max(1, maxApproxBytes);
+        }
+
+        internal Bitmap? GetOrAdd(string? path, int decodeWidth, bool pin, Func<string, int, Bitmap?> loader)
+        {
+            if (string.IsNullOrWhiteSpace(path) || decodeWidth <= 0)
+            {
+                return null;
+            }
+
+            var key = BuildCacheKey(path, decodeWidth);
+            if (_entries.TryGetValue(key, out var existingNode))
+            {
+                if (pin && !existingNode.Value.Pinned)
+                {
+                    existingNode.Value = existingNode.Value with { Pinned = true };
+                }
+
+                _lru.Remove(existingNode);
+                _lru.AddFirst(existingNode);
+                return existingNode.Value.Bitmap;
+            }
+
+            var bitmap = loader(path!, decodeWidth);
+            if (bitmap is null)
+            {
+                return null;
+            }
+
+            var approxBytes = EstimateApproxBytes(bitmap);
+            var entry = new CacheEntry(key, bitmap, approxBytes, pin);
+            var node = _lru.AddFirst(entry);
+            _entries[key] = node;
+            _currentApproxBytes += approxBytes;
+            Trim();
+            return bitmap;
+        }
+
+        internal void Clear()
+        {
+            foreach (var entry in _lru)
+            {
+                entry.Bitmap.Dispose();
+            }
+
+            _entries.Clear();
+            _lru.Clear();
+            _currentApproxBytes = 0;
+        }
+
+        private void Trim()
+        {
+            while (_entries.Count > _maxItems || _currentApproxBytes > _maxApproxBytes)
+            {
+                var node = FindEvictionCandidate();
+                if (node is null)
+                {
+                    return;
+                }
+
+                Evict(node);
+            }
+        }
+
+        private LinkedListNode<CacheEntry>? FindEvictionCandidate()
+        {
+            var node = _lru.Last;
+            while (node is not null && node.Value.Pinned)
+            {
+                node = node.Previous;
+            }
+
+            return node;
+        }
+
+        private void Evict(LinkedListNode<CacheEntry> node)
+        {
+            var entry = node.Value;
+            _entries.Remove(entry.Key);
+            _lru.Remove(node);
+            _currentApproxBytes -= entry.ApproxBytes;
+            entry.Bitmap.Dispose();
+        }
+
+        private static long EstimateApproxBytes(Bitmap bitmap)
+        {
+            var pixelSize = bitmap.PixelSize;
+            return Math.Max(1L, (long)pixelSize.Width * pixelSize.Height * 4);
+        }
+
+        private static string BuildCacheKey(string path, int decodeWidth)
+        {
+            return $"{decodeWidth}:{path}";
+        }
+
+        private readonly record struct CacheEntry(string Key, Bitmap Bitmap, long ApproxBytes, bool Pinned);
+    }
 }
 
 public readonly record struct RevealOutcome(bool Applied, bool Solved, bool NeedResort, string? SolvedTeamId)
@@ -758,7 +885,6 @@ public enum PresentationRowState
 
 public sealed class PreFreezeScoreboardRowViewModel : ViewModelBase
 {
-    private static readonly Dictionary<string, Bitmap?> TeamLogoCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly IReadOnlyList<ProblemDisplayInfo> _orderedProblems;
     private readonly TeamStatus _source;
     private int _rank;
@@ -767,14 +893,12 @@ public sealed class PreFreezeScoreboardRowViewModel : ViewModelBase
         TeamStatus source,
         int rank,
         IReadOnlyList<ProblemDisplayInfo> orderedProblems,
-        string? cdpPath,
-        string? logoExtension)
+        Bitmap? teamLogoImage)
     {
         _source = source;
         _orderedProblems = orderedProblems;
         _rank = rank;
-        var logoPath = BuildTeamLogoPath(cdpPath, source.TeamAffiliation, logoExtension);
-        TeamLogoImage = LoadTeamLogoImageCached(logoPath);
+        TeamLogoImage = teamLogoImage;
         ProblemCells = BuildProblemCells(orderedProblems, source.ProblemStats);
     }
 
@@ -804,53 +928,6 @@ public sealed class PreFreezeScoreboardRowViewModel : ViewModelBase
         OnPropertyChanged(nameof(TotalPoints));
         OnPropertyChanged(nameof(TotalPenalty));
         UpdateProblemCells();
-    }
-
-    private static string? BuildTeamLogoPath(string? cdpPath, string? teamAffiliation, string? logoExtension)
-    {
-        if (string.IsNullOrWhiteSpace(cdpPath) ||
-            string.IsNullOrWhiteSpace(teamAffiliation) ||
-            string.IsNullOrWhiteSpace(logoExtension))
-        {
-            Trace.WriteLine(
-                $"[PreFreezeRowVM] LogoPathInputsMissing: cdpPath={cdpPath}, teamAffiliation={teamAffiliation}, logoExtension={logoExtension}");
-            return null;
-        }
-
-        var extension = logoExtension.Trim().TrimStart('.');
-        if (extension.Length == 0)
-        {
-            return null;
-        }
-
-        var candidatePath = Path.Combine(cdpPath, "affiliations", $"{teamAffiliation}.{extension}");
-        return File.Exists(candidatePath) ? candidatePath : null;
-    }
-
-    private static Bitmap? LoadTeamLogoImageCached(string? logoPath)
-    {
-        if (string.IsNullOrWhiteSpace(logoPath))
-        {
-            return null;
-        }
-
-        if (TeamLogoCache.TryGetValue(logoPath, out var cached))
-        {
-            return cached;
-        }
-
-        Bitmap? bitmap;
-        try
-        {
-            bitmap = new Bitmap(logoPath);
-        }
-        catch
-        {
-            bitmap = null;
-        }
-
-        TeamLogoCache[logoPath] = bitmap;
-        return bitmap;
     }
 
     private static ObservableCollection<ProblemStatusCellViewModel> BuildProblemCells(
