@@ -183,24 +183,16 @@ public sealed class SetMedalStageViewModel : ViewModelBase
 
     public void SaveMedalsToFile(string path)
     {
-        if (_contestState is null)
-        {
-            StatusMessage = "No contest state loaded.";
-            return;
-        }
+        if (!TryGetContestState(out var contestState)) return;
 
-        var json = JsonSerializer.Serialize(_contestState.Awards, JsonOptions);
+        var json = JsonSerializer.Serialize(contestState.Awards, JsonOptions);
         File.WriteAllText(path, json);
         StatusMessage = $"Saved medals to {path}";
     }
 
     public void LoadMedalsFromFile(string path)
     {
-        if (_contestState is null)
-        {
-            StatusMessage = "No contest state loaded.";
-            return;
-        }
+        if (!TryGetContestState(out var contestState)) return;
 
         var raw = File.ReadAllText(path);
         var parsed = JsonSerializer.Deserialize<Dictionary<string, Award>>(raw, JsonOptions);
@@ -214,24 +206,24 @@ public sealed class SetMedalStageViewModel : ViewModelBase
             normalized[medal.Id] = medal;
         }
 
-        _contestState.Awards = normalized;
+        contestState.Awards = normalized;
         RefreshMedals();
-        StatusMessage = $"Loaded {_contestState.Awards.Count} medal(s) from {path}";
+        StatusMessage = $"Loaded {contestState.Awards.Count} medal(s) from {path}";
     }
 
     public bool TryPreparePresentation(out string errorMessage)
     {
         errorMessage = string.Empty;
-        if (_contestState is null)
+        if (!TryGetContestState(out var contestState))
         {
-            errorMessage = "No contest state loaded.";
+            errorMessage = StatusMessage;
             return false;
         }
 
         try
         {
-            var dumpMessage = DumpContestStateBeforePresentation(_contestState);
-            var filterMessage = ApplyGroupFilterForPresentation(_contestState);
+            var dumpMessage = DumpContestStateBeforePresentation(contestState);
+            var filterMessage = ApplyGroupFilterForPresentation(contestState);
             StatusMessage = $"{dumpMessage}; {filterMessage}";
             _finalizedCacheKey = string.Empty;
             _finalizedLeaderboard = [];
@@ -378,32 +370,15 @@ public sealed class SetMedalStageViewModel : ViewModelBase
 
     private void ApplyMedals()
     {
-        if (_contestState is null)
-        {
-            StatusMessage = "No contest state loaded.";
-            return;
-        }
+        if (!TryGetContestState(out var contestState)) return;
 
-        _contestState.Awards["medal-gold"] = new Award
-        {
-            Id = "medal-gold",
-            Citation = MedalGoldCitation.Trim(),
-            TeamIds = GoldPreview.Select(x => x.TeamId).ToList()
-        };
-
-        _contestState.Awards["medal-silver"] = new Award
-        {
-            Id = "medal-silver",
-            Citation = MedalSilverCitation.Trim(),
-            TeamIds = SilverPreview.Select(x => x.TeamId).ToList()
-        };
-
-        _contestState.Awards["medal-bronze"] = new Award
-        {
-            Id = "medal-bronze",
-            Citation = MedalBronzeCitation.Trim(),
-            TeamIds = BronzePreview.Select(x => x.TeamId).ToList()
-        };
+        foreach (var (medalId, citation, winners) in BuildStandardMedalSpecifications())
+            contestState.Awards[medalId] = new Award
+            {
+                Id = medalId,
+                Citation = citation,
+                TeamIds = winners
+            };
 
         RefreshMedals();
         StatusMessage = "Medals applied to contest state.";
@@ -411,11 +386,7 @@ public sealed class SetMedalStageViewModel : ViewModelBase
 
     private void AddOrUpdateMedal()
     {
-        if (_contestState is null)
-        {
-            StatusMessage = "No contest state loaded.";
-            return;
-        }
+        if (!TryGetContestState(out var contestState)) return;
 
         var medalId = ManualMedalId.Trim();
         var citation = ManualCitation.Trim();
@@ -430,7 +401,7 @@ public sealed class SetMedalStageViewModel : ViewModelBase
             return;
         }
 
-        _contestState.Awards[medalId] = new Award
+        contestState.Awards[medalId] = new Award
         {
             Id = medalId,
             Citation = citation,
@@ -443,9 +414,11 @@ public sealed class SetMedalStageViewModel : ViewModelBase
 
     private void DeleteMedal(string? medalId)
     {
-        if (_contestState is null || string.IsNullOrWhiteSpace(medalId)) return;
+        if (!TryGetContestState(out var contestState, setStatusOnFailure: false) ||
+            string.IsNullOrWhiteSpace(medalId))
+            return;
 
-        if (_contestState.Awards.Remove(medalId))
+        if (contestState.Awards.Remove(medalId))
         {
             RefreshMedals();
             StatusMessage = $"Deleted medal {medalId}.";
@@ -522,6 +495,38 @@ public sealed class SetMedalStageViewModel : ViewModelBase
 
         return
             $"Filtered presentation set: teams {originalTeamCount} -> {contestState.Teams.Count}, submissions {originalSubmissionCount} -> {contestState.Submissions.Count}, judgements {originalJudgementCount} -> {contestState.Judgements.Count}";
+    }
+
+    private bool TryGetContestState(
+        out ContestState contestState,
+        bool setStatusOnFailure = true)
+    {
+        if (_contestState is not null)
+        {
+            contestState = _contestState;
+            return true;
+        }
+
+        contestState = null!;
+        if (setStatusOnFailure)
+            StatusMessage = "No contest state loaded.";
+        return false;
+    }
+
+    private IEnumerable<(string MedalId, string Citation, List<string> Winners)> BuildStandardMedalSpecifications()
+    {
+        yield return (
+            "medal-gold",
+            MedalGoldCitation.Trim(),
+            GoldPreview.Select(x => x.TeamId).ToList());
+        yield return (
+            "medal-silver",
+            MedalSilverCitation.Trim(),
+            SilverPreview.Select(x => x.TeamId).ToList());
+        yield return (
+            "medal-bronze",
+            MedalBronzeCitation.Trim(),
+            BronzePreview.Select(x => x.TeamId).ToList());
     }
 }
 

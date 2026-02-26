@@ -1,6 +1,7 @@
 using Pyrite.Models;
 using Pyrite.Services;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Threading;
@@ -97,11 +98,7 @@ public sealed class LoadDataStageViewModel : ViewModelBase
         var validationErrors = ValidateCdpFolder(folderPath);
         if (validationErrors.Count > 0)
         {
-            foreach (var error in validationErrors) ParseErrors.Add(error);
-
-            ValidationStatus = "CDP folder validation failed.";
-            OnPropertyChanged(nameof(HasValidationStatus));
-            OnPropertyChanged(nameof(HasParseErrors));
+            SetValidationFailure(validationErrors);
             return;
         }
 
@@ -114,9 +111,9 @@ public sealed class LoadDataStageViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            ParseErrors.Add(ex.Message);
-            ValidationStatus = "CDP folder is valid but config.toml is invalid.";
-            OnPropertyChanged(nameof(HasParseErrors));
+            SetValidationFailure(
+                [ex.Message],
+                "CDP folder is valid but config.toml is invalid.");
             return;
         }
 
@@ -151,8 +148,7 @@ public sealed class LoadDataStageViewModel : ViewModelBase
 
             if (result.ErrorCount > 0)
             {
-                ParseStatus = $"Parsed {result.LinesRead} lines with {result.ErrorCount} error(s).";
-                IsParseSuccessful = false;
+                SetParsingFailure($"Parsed {result.LinesRead} lines with {result.ErrorCount} error(s).");
                 return;
             }
 
@@ -165,15 +161,11 @@ public sealed class LoadDataStageViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
-            ParseStatus = "Parsing canceled.";
-            IsParseSuccessful = false;
+            SetParsingFailure("Parsing canceled.");
         }
         catch (Exception ex)
         {
-            ParseErrors.Add(ex.Message);
-            OnPropertyChanged(nameof(HasParseErrors));
-            ParseStatus = "Parsing failed.";
-            IsParseSuccessful = false;
+            SetParsingFailure("Parsing failed.", ex.Message);
         }
         finally
         {
@@ -213,6 +205,39 @@ public sealed class LoadDataStageViewModel : ViewModelBase
         IsParseSuccessful = false;
         LoadedContestState = null;
 
+        NotifyStatusCollectionsChanged();
+    }
+
+    private void SetValidationFailure(
+        IEnumerable<string> errors,
+        string status = "CDP folder validation failed.")
+    {
+        AppendParseErrors(errors);
+        ValidationStatus = status;
+        OnPropertyChanged(nameof(HasValidationStatus));
+        OnPropertyChanged(nameof(HasParseErrors));
+    }
+
+    private void SetParsingFailure(string status, params string[] errors)
+    {
+        if (errors.Length > 0)
+        {
+            AppendParseErrors(errors);
+            OnPropertyChanged(nameof(HasParseErrors));
+        }
+
+        ParseStatus = status;
+        IsParseSuccessful = false;
+    }
+
+    private void AppendParseErrors(IEnumerable<string> errors)
+    {
+        foreach (var error in errors)
+            ParseErrors.Add(error);
+    }
+
+    private void NotifyStatusCollectionsChanged()
+    {
         OnPropertyChanged(nameof(HasValidationStatus));
         OnPropertyChanged(nameof(HasParseErrors));
         OnPropertyChanged(nameof(HasParseWarnings));

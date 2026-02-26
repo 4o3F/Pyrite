@@ -293,8 +293,7 @@ public partial class PresentationStageView : UserControl
             return;
         }
 
-        var elapsedSeconds = (Stopwatch.GetTimestamp() - _animationStartTimestamp) / (double)Stopwatch.Frequency;
-        var progress = Math.Clamp(elapsedSeconds / FocusScrollDuration.TotalSeconds, 0, 1);
+        var progress = ComputeAnimationProgress(_animationStartTimestamp, FocusScrollDuration.TotalSeconds);
         var eased = EaseOutCubic(progress);
         var nextOffsetY = _animationStartOffsetY +
                           ((_animationTargetOffsetY - _animationStartOffsetY) * eased);
@@ -328,6 +327,20 @@ public partial class PresentationStageView : UserControl
         return t < 0.5
             ? 4 * t * t * t
             : 1 - Math.Pow(-2 * t + 2, 3) / 2;
+    }
+
+    private static double ComputeAnimationProgress(long startTimestamp, double durationSeconds)
+    {
+        return ComputeAnimationProgress(
+            Stopwatch.GetTimestamp(),
+            startTimestamp,
+            durationSeconds);
+    }
+
+    private static double ComputeAnimationProgress(long nowTimestamp, long startTimestamp, double durationSeconds)
+    {
+        var elapsedSeconds = (nowTimestamp - startTimestamp) / (double)Stopwatch.Frequency;
+        return Math.Clamp(elapsedSeconds / Math.Max(0.001, durationSeconds), 0, 1);
     }
 
     private void TryStartMoveUpAnimation(MoveUpAnimationRequest request, bool allowDeferredRetry)
@@ -593,8 +606,7 @@ public partial class PresentationStageView : UserControl
         for (var i = _activeMoveUpAnimations.Count - 1; i >= 0; i--)
         {
             var animation = _activeMoveUpAnimations[i];
-            var elapsedSeconds = (now - animation.StartTimestamp) / (double)Stopwatch.Frequency;
-            var progress = Math.Clamp(elapsedSeconds / animation.DurationSeconds, 0, 1);
+            var progress = ComputeAnimationProgress(now, animation.StartTimestamp, animation.DurationSeconds);
             var eased = progress;
             var currentY = animation.StartY + ((animation.TargetY - animation.StartY) * eased);
             Canvas.SetTop(animation.OverlayVisual, currentY);
@@ -610,8 +622,7 @@ public partial class PresentationStageView : UserControl
         for (var i = _activeDownShiftAnimations.Count - 1; i >= 0; i--)
         {
             var animation = _activeDownShiftAnimations[i];
-            var elapsedSeconds = (now - animation.StartTimestamp) / (double)Stopwatch.Frequency;
-            var progress = Math.Clamp(elapsedSeconds / animation.DurationSeconds, 0, 1);
+            var progress = ComputeAnimationProgress(now, animation.StartTimestamp, animation.DurationSeconds);
             var eased = EaseOutCubic(progress);
             animation.Transform.Y = animation.StartY + ((animation.TargetY - animation.StartY) * eased);
 
@@ -684,8 +695,7 @@ public partial class PresentationStageView : UserControl
             return;
         }
 
-        var elapsedSeconds = (Stopwatch.GetTimestamp() - _awardOverlayFadeStartTimestamp) / (double)Stopwatch.Frequency;
-        var progress = Math.Clamp(elapsedSeconds / AwardOverlayFadeDuration.TotalSeconds, 0, 1);
+        var progress = ComputeAnimationProgress(_awardOverlayFadeStartTimestamp, AwardOverlayFadeDuration.TotalSeconds);
         var eased = EaseInOutCubic(progress);
         AwardOverlayRoot.Opacity =
             _awardOverlayFadeStartOpacity + ((_awardOverlayFadeTargetOpacity - _awardOverlayFadeStartOpacity) * eased);

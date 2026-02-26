@@ -13,6 +13,16 @@ public enum AppStage
 
 public class MainWindowViewModel : ViewModelBase
 {
+    private readonly record struct StageInfo(string Key, string Title, string Description);
+    private static readonly StageInfo LoadDataInfo = new(
+        "load_data",
+        "Load Data",
+        "Validate CDP input, parse event-feed.ndjson, and build standings.");
+    private static readonly StageInfo SetMedalInfo = new(
+        "set_medal",
+        "Set Medal",
+        "Review ranking and assign medal citations, then launch presentation.");
+
     private AppStage _currentStage = AppStage.LoadData;
     private bool _isPresentationActive;
 
@@ -73,26 +83,11 @@ public class MainWindowViewModel : ViewModelBase
 
     public bool IsWorkflowVisible => !IsPresentationActive;
 
-    public string CurrentStageKey => CurrentStage switch
-    {
-        AppStage.LoadData => "load_data",
-        AppStage.SetMedal => "set_medal",
-        _ => "unknown"
-    };
+    public string CurrentStageKey => GetStageInfo(CurrentStage).Key;
 
-    public string StageTitle => CurrentStage switch
-    {
-        AppStage.LoadData => "Load Data",
-        AppStage.SetMedal => "Set Medal",
-        _ => "Unknown Stage"
-    };
+    public string StageTitle => GetStageInfo(CurrentStage).Title;
 
-    public string StageDescription => CurrentStage switch
-    {
-        AppStage.LoadData => "Validate CDP input, parse event-feed.ndjson, and build standings.",
-        AppStage.SetMedal => "Review ranking and assign medal citations, then launch presentation.",
-        _ => string.Empty
-    };
+    public string StageDescription => GetStageInfo(CurrentStage).Description;
 
     public bool IsLoadDataStage => CurrentStage == AppStage.LoadData;
     public bool IsSetMedalStage => CurrentStage == AppStage.SetMedal;
@@ -111,11 +106,21 @@ public class MainWindowViewModel : ViewModelBase
 
     private void NotifyWorkflowStateChanged()
     {
+        NotifyWorkflowStatePropertiesChanged();
+        NotifyWorkflowCommandsCanExecuteChanged();
+    }
+
+    private void NotifyWorkflowStatePropertiesChanged()
+    {
         OnPropertyChanged(nameof(CanMovePrevious));
         OnPropertyChanged(nameof(CanMoveNext));
         OnPropertyChanged(nameof(CanLaunchPresentation));
         OnPropertyChanged(nameof(CanExecutePrimaryAction));
         OnPropertyChanged(nameof(PrimaryActionText));
+    }
+
+    private void NotifyWorkflowCommandsCanExecuteChanged()
+    {
         PreviousStageCommand.NotifyCanExecuteChanged();
         NextStageCommand.NotifyCanExecuteChanged();
         LaunchPresentationCommand.NotifyCanExecuteChanged();
@@ -153,10 +158,10 @@ public class MainWindowViewModel : ViewModelBase
     private void LaunchPresentation()
     {
         if (!CanLaunchPresentation) return;
-
         if (!SetMedalStage.TryPreparePresentation(out _)) return;
         var contestState = LoadDataStage.LoadedContestState;
         if (contestState is null) return;
+
         Trace.WriteLine(
             $"[MainWindowVM] LaunchPresentation: ts={DateTime.Now:HH:mm:ss.fff}, " +
             $"teams={contestState.Teams.Count}, preFreeze={contestState.LeaderboardPreFreeze.Count}, " +
@@ -185,5 +190,15 @@ public class MainWindowViewModel : ViewModelBase
         }
 
         if (CanLaunchPresentation) LaunchPresentation();
+    }
+
+    private static StageInfo GetStageInfo(AppStage stage)
+    {
+        return stage switch
+        {
+            AppStage.LoadData => LoadDataInfo,
+            AppStage.SetMedal => SetMedalInfo,
+            _ => new StageInfo("unknown", "Unknown Stage", string.Empty)
+        };
     }
 }

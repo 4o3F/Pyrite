@@ -189,6 +189,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
 
     public void UpdateViewport(double width, double height, double totalHeight)
     {
+        // Compatibility bridge: totalHeight is currently not used by VM logic.
         UpdateViewport(width, height);
     }
 
@@ -231,22 +232,17 @@ public sealed class PresentationStageViewModel : ViewModelBase
                 }
                 else
                 {
-                    // Team has no pending reveals, finished
-                    if (!HasPendingReveal(teamId))
+                    Trace.WriteLine($"[PresentationStageVM] TeamNoPendingReveal: focusIndex={FocusedRowIndex}");
+                    if (HasAwards(teamId))
                     {
-                        Trace.WriteLine($"[PresentationStageVM] TeamNoPendingReveal: focusIndex={FocusedRowIndex}");
-                        if (HasAwards(teamId))
-                        {
-                            // Team has award, show it
-                            ShowAwardOverlay(teamId);
-                            State = PresentationRowState.RowCompleteAwardShowing;
-                        }
-                        else
-                        {
-                            Trace.WriteLine("[PresentationStageVM] Action: move_up");
-                            RunMoveUp();
-                            State = PresentationRowState.RowInProgress;
-                        }
+                        ShowAwardOverlay(teamId);
+                        State = PresentationRowState.RowCompleteAwardShowing;
+                    }
+                    else
+                    {
+                        Trace.WriteLine("[PresentationStageVM] Action: move_up");
+                        RunMoveUp();
+                        State = PresentationRowState.RowInProgress;
                     }
                 }
 
@@ -517,7 +513,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
             var label = string.IsNullOrWhiteSpace(award.Citation) ? award.Id : award.Citation;
             if (!string.IsNullOrWhiteSpace(label))
             {
-                lines.Add($"{label}");
+                lines.Add(label);
             }
         }
 
@@ -600,21 +596,17 @@ public sealed class PresentationStageViewModel : ViewModelBase
             return cached;
         }
 
-        Bitmap? bitmap;
-        try
-        {
-            bitmap = new Bitmap(path);
-        }
-        catch
-        {
-            bitmap = null;
-        }
-
+        var bitmap = LoadBitmap(path);
         ImageCache[path] = bitmap;
         return bitmap;
     }
 
     private static Bitmap? LoadImageUncached(string? path)
+    {
+        return LoadBitmap(path);
+    }
+
+    private static Bitmap? LoadBitmap(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
         {

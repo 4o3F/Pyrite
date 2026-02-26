@@ -81,16 +81,6 @@ public partial class SetMedalStageView : UserControl
         }
     }
 
-    private void OnPresentClick(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is not SetMedalStageViewModel) return;
-
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel?.DataContext is not MainWindowViewModel mainWindowViewModel) return;
-
-        mainWindowViewModel.LaunchPresentationCommand.Execute(null);
-    }
-
     private void OnDeleteMedalClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not SetMedalStageViewModel viewModel) return;

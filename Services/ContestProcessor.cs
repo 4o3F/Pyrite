@@ -15,24 +15,11 @@ public static class ContestProcessor
         ValidateTeamGroups(state);
         ValidateAllSubmissionsJudged(state);
 
-        var contest = state.Contest ?? throw new InvalidOperationException("Contest not defined.");
-        var contestStart = contest.StartTime ?? throw new InvalidOperationException("Contest start time not defined.");
-        var contestFreeze = contest.ScoreboardFreezeTime ??
-                            throw new InvalidOperationException("Contest freeze time not defined.");
+        var (contestStart, contestFreeze) = GetContestTimes(state);
 
         var warnings = new List<string>();
         var preFreezeMap = BuildInitialTeamStatusMap(state);
-
-        foreach (var judgement in BuildJudgementOrder(state))
-        {
-            var submission = TryGetSubmissionForJudgement(state, judgement, warnings);
-            if (submission is null) continue;
-
-            if (submission.Time is null && judgement.StartTime is null)
-                throw new InvalidOperationException($"Unknown submission time for submission {submission.Id}.");
-
-            ApplyJudgementToStatus(state, preFreezeMap, judgement, contestStart, contestFreeze);
-        }
+        ApplyJudgementsToStatusMap(state, preFreezeMap, contestStart, contestFreeze, warnings);
 
         state.LeaderboardPreFreeze = ToSortedLeaderboard(preFreezeMap);
         state.LeaderboardFinalized = ComputeFinalizedLeaderboard(state);
@@ -207,15 +194,10 @@ public static class ContestProcessor
 
     private static List<TeamStatus> ComputeFinalizedLeaderboard(ContestState state)
     {
-        var contest = state.Contest ?? throw new InvalidOperationException("Contest not defined.");
-        var contestStart = contest.StartTime ?? throw new InvalidOperationException("Contest start time not defined.");
-        var contestFreeze = contest.ScoreboardFreezeTime ??
-                            throw new InvalidOperationException("Contest freeze time not defined.");
+        var (contestStart, contestFreeze) = GetContestTimes(state);
 
         var finalizedMap = BuildInitialTeamStatusMap(state);
-
-        foreach (var judgement in BuildJudgementOrder(state))
-            ApplyJudgementToStatus(state, finalizedMap, judgement, contestStart, contestFreeze);
+        ApplyJudgementsToStatusMap(state, finalizedMap, contestStart, contestFreeze);
 
         RecomputeTeamTotals(finalizedMap);
         return ToSortedLeaderboard(finalizedMap);
@@ -226,5 +208,36 @@ public static class ContestProcessor
         var sorted = map.Values.ToList();
         sorted.Sort();
         return sorted;
+    }
+
+    private static (DateTimeOffset ContestStart, DateTimeOffset ContestFreeze) GetContestTimes(ContestState state)
+    {
+        var contest = state.Contest ?? throw new InvalidOperationException("Contest not defined.");
+        var contestStart = contest.StartTime ?? throw new InvalidOperationException("Contest start time not defined.");
+        var contestFreeze = contest.ScoreboardFreezeTime ??
+                            throw new InvalidOperationException("Contest freeze time not defined.");
+        return (contestStart, contestFreeze);
+    }
+
+    private static void ApplyJudgementsToStatusMap(
+        ContestState state,
+        Dictionary<string, TeamStatus> teamStatusMap,
+        DateTimeOffset contestStart,
+        DateTimeOffset contestFreeze,
+        List<string>? warnings = null)
+    {
+        foreach (var judgement in BuildJudgementOrder(state))
+        {
+            if (warnings is not null)
+            {
+                var submission = TryGetSubmissionForJudgement(state, judgement, warnings);
+                if (submission is null) continue;
+
+                if (submission.Time is null && judgement.StartTime is null)
+                    throw new InvalidOperationException($"Unknown submission time for submission {submission.Id}.");
+            }
+
+            ApplyJudgementToStatus(state, teamStatusMap, judgement, contestStart, contestFreeze);
+        }
     }
 }

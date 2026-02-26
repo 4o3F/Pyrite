@@ -112,13 +112,13 @@ public static class EventFeedParser
         }
         catch (Exception ex)
         {
-            errors.Add($"Line {lineNumber}: {ex.Message}");
+            AddLineError(errors, lineNumber, ex.Message);
             return;
         }
 
         if (parsedEvent is null)
         {
-            errors.Add($"Line {lineNumber}: Invalid event payload");
+            AddLineError(errors, lineNumber, "Invalid event payload");
             return;
         }
 
@@ -166,7 +166,7 @@ public static class EventFeedParser
             case EventType.Persons:
                 break;
             default:
-                errors.Add($"Line {lineNumber}: Unsupported event type '{parsedEvent.EventType}'");
+                AddLineError(errors, lineNumber, $"Unsupported event type '{parsedEvent.EventType}'");
                 break;
         }
     }
@@ -178,7 +178,7 @@ public static class EventFeedParser
             var contest = eventData.Deserialize<Contest>(JsonOptions);
             if (contest is null)
             {
-                errors.Add($"Line {lineNumber}: Empty contest payload");
+                AddLineError(errors, lineNumber, "Empty contest payload");
                 return;
             }
 
@@ -190,7 +190,7 @@ public static class EventFeedParser
         }
         catch (Exception ex)
         {
-            errors.Add($"Line {lineNumber}: Failed to parse contest payload: {ex.Message}");
+            AddLineError(errors, lineNumber, $"Failed to parse contest payload: {ex.Message}");
         }
     }
 
@@ -205,7 +205,7 @@ public static class EventFeedParser
     {
         if (!contestDefined)
         {
-            errors.Add($"Line {lineNumber}: Contest must be defined before {eventName}");
+            AddLineError(errors, lineNumber, $"Contest must be defined before {eventName}");
             return;
         }
 
@@ -214,7 +214,7 @@ public static class EventFeedParser
             var item = eventData.Deserialize<T>(JsonOptions);
             if (item is null)
             {
-                errors.Add($"Line {lineNumber}: Empty {eventName} payload");
+                AddLineError(errors, lineNumber, $"Empty {eventName} payload");
                 return;
             }
 
@@ -222,7 +222,12 @@ public static class EventFeedParser
         }
         catch (Exception ex)
         {
-            errors.Add($"Line {lineNumber}: Failed to parse {eventName} payload: {ex.Message}");
+            AddLineError(errors, lineNumber, $"Failed to parse {eventName} payload: {ex.Message}");
         }
+    }
+
+    private static void AddLineError(List<string> errors, long lineNumber, string message)
+    {
+        errors.Add($"Line {lineNumber}: {message}");
     }
 }
