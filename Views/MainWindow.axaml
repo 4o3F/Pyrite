@@ -22,6 +22,7 @@
             <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="16">
                 <StackPanel Grid.Row="0" Spacing="4">
                     <TextBlock Text="Pyrite" FontSize="24" FontWeight="SemiBold" />
+                    <TextBlock Text="by 4o3F" FontSize="12" FontWeight="Bold" />
                 </StackPanel>
 
                 <Border Grid.Row="1" Padding="14" CornerRadius="8" BorderBrush="#3AFFFFFF" BorderThickness="1">

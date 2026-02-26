@@ -1,46 +1,48 @@
 <UserControl xmlns="https://github.com/avaloniaui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vm="using:Pyrite.ViewModels"
-             x:Class="Pyrite.Views.LoadDataStageView"
-             x:DataType="vm:LoadDataStageViewModel">
-    <Border Padding="16" CornerRadius="8" BorderBrush="#3AFFFFFF" BorderThickness="1">
-        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
-            <TextBlock Grid.Row="0" Text="Stage: load_data" FontSize="18" FontWeight="SemiBold" />
+			 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+			 xmlns:vm="using:Pyrite.ViewModels"
+			 x:Class="Pyrite.Views.LoadDataStageView"
+			 x:DataType="vm:LoadDataStageViewModel">
+	<Border Padding="16" CornerRadius="8" BorderBrush="#3AFFFFFF" BorderThickness="1">
+		<Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10">
+			<TextBlock Grid.Row="0" Text="Stage: load_data" FontSize="18" FontWeight="SemiBold" />
 
-            <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                <TextBox Grid.Column="0" Text="{Binding CdpPath}" IsReadOnly="True" Watermark="Select CDP folder" />
-                <Button Grid.Column="1" Content="Select CDP Folder" Click="OnSelectFolderClick"
-                        IsEnabled="{Binding IsNotParsing}" />
-            </Grid>
+			<Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+				<TextBox Grid.Column="0" Text="{Binding CdpPath}" IsReadOnly="True" Watermark="Select CDP folder" />
+				<Button Grid.Column="1" Content="Select CDP Folder" Click="OnSelectFolderClick"
+						IsEnabled="{Binding IsNotParsing}" />
+			</Grid>
 
-            <StackPanel Grid.Row="2" Spacing="4">
-                <TextBlock Text="{Binding ValidationStatus}" IsVisible="{Binding HasValidationStatus}" />
-                <TextBlock Text="{Binding ParseStatus}" />
-            </StackPanel>
+			<StackPanel Grid.Row="2" Spacing="4">
+				<TextBlock Text="{Binding ValidationStatus}" IsVisible="{Binding HasValidationStatus}" />
+				<TextBlock Text="{Binding ParseStatus}" />
+			</StackPanel>
 
-            <ProgressBar Grid.Row="3" Minimum="0" Maximum="1" Value="{Binding ParseProgress}" Height="14" />
+			<ProgressBar Grid.Row="3" Minimum="0" Maximum="1" Value="{Binding ParseProgress}" Height="14" />
 
-            <StackPanel Grid.Row="4" Spacing="4" IsVisible="{Binding HasParseWarnings}">
-                <TextBlock Text="Warnings" FontWeight="SemiBold" />
-                <ItemsControl ItemsSource="{Binding ParseWarnings}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding .}" TextWrapping="Wrap" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
+			<Border Grid.Row="4" Padding="8" CornerRadius="8" BorderThickness="1" BorderBrush="#FF8904" IsVisible="{Binding HasParseWarnings}">
+				<StackPanel Spacing="4" TextElement.Foreground="#FF8904">
+					<TextBlock Text="Warnings" FontWeight="SemiBold" />
+					<ItemsControl ItemsSource="{Binding ParseWarnings}">
+						<ItemsControl.ItemTemplate>
+							<DataTemplate>
+								<TextBlock Text="{Binding .}" TextWrapping="Wrap" />
+							</DataTemplate>
+						</ItemsControl.ItemTemplate>
+					</ItemsControl>
+				</StackPanel>
+			</Border>
 
-            <StackPanel Grid.Row="5" Spacing="4" IsVisible="{Binding HasParseErrors}">
-                <TextBlock Text="Errors" FontWeight="SemiBold" />
-                <ItemsControl ItemsSource="{Binding ParseErrors}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding .}" TextWrapping="Wrap" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
-        </Grid>
-    </Border>
+			<StackPanel Grid.Row="5" Spacing="4" IsVisible="{Binding HasParseErrors}">
+				<TextBlock Text="Errors" FontWeight="SemiBold" />
+				<ItemsControl ItemsSource="{Binding ParseErrors}">
+					<ItemsControl.ItemTemplate>
+						<DataTemplate>
+							<TextBlock Text="{Binding .}" TextWrapping="Wrap" />
+						</DataTemplate>
+					</ItemsControl.ItemTemplate>
+				</ItemsControl>
+			</StackPanel>
+		</Grid>
+	</Border>
 </UserControl>
