@@ -48,7 +48,7 @@ public partial class PresentationStageView : UserControl
         DataContextChanged += OnDataContextChanged;
         AttachedToVisualTree += OnAttachedToVisualTree;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
-        PointerPressed += (_, _) => Focus();
+        PointerPressed += OnPointerPressed;
         SizeChanged += OnViewSizeChanged;
         ScoreboardList.SizeChanged += (_, _) =>
         {
@@ -71,13 +71,31 @@ public partial class PresentationStageView : UserControl
             return;
         }
 
+        HandleStepRequested();
+        e.Handled = true;
+    }
+
+    private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        Focus();
+
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        HandleStepRequested();
+        e.Handled = true;
+    }
+
+    private void HandleStepRequested()
+    {
         if (DataContext is not PresentationStageViewModel vm)
         {
             return;
         }
 
         vm.HandleSpacePressed();
-        e.Handled = true;
     }
 
     private void ToggleFullscreen()
