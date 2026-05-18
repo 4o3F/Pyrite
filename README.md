@@ -42,9 +42,35 @@ Main logic is shown as following state machine.
 ![presentation flow](Docs/presentation_workflow.svg)
 
 ## Build
-For a fully static AOT build, place the following static libraries inside the `Native` directory for linking:
+
+### Windows Native AOT static linking
+
+For a fully static Windows AOT build, first place the required static libraries inside the `Native` directory:
 
 * [https://github.com/2ndlab/ANGLE.Static](https://github.com/2ndlab/ANGLE.Static)
 * [https://github.com/2ndlab/SkiaSharp.Static](https://github.com/2ndlab/SkiaSharp.Static)
 
-After that, the build should be completely self-contained.
+The expected files are:
+
+```text
+Native\libHarfBuzzSharp.lib
+Native\skia.lib
+Native\SkiaSharp.lib
+Native\av_libglesv2.lib
+```
+
+Then uncomment the `ItemGroup` labeled `ImportLib` in `Pyrite.csproj` so the AOT publish can link these libraries through `DirectPInvoke` / `NativeLibrary`.
+
+From a Windows PowerShell terminal, run:
+
+```powershell
+dotnet publish .\Pyrite.csproj -c Release -r win-x64 -p:PublishAot=true --self-contained true
+```
+
+To publish into a fixed output directory, run:
+
+```powershell
+dotnet publish .\Pyrite.csproj -c Release -r win-x64 -p:PublishAot=true --self-contained true -o .\out\win-x64-aot
+```
+
+`Pyrite.csproj` already sets `PublishAot` to `true`, but keeping `-p:PublishAot=true` in the command makes the release intent explicit. The published executable will be under the selected output directory, or under `bin\Release\net10.0\win-x64\publish` when `-o` is not specified.
