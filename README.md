@@ -1,8 +1,9 @@
 # Pyrite
 A fast, memory-efficient ICPC contest resolver for DomJudge.
 Created after being thoroughly tortured by the ICPC Tool.
-> [!CAUTION]
-> This program is still experimental. Use it in production at your own risk.
+> [!IMPORTANT]
+> This program is still experimental. Use it in production at your own risk.  
+> Has been tested on **ICPC 2026 Xi'an Invitation Contest**.
 
 ## Usage
 First, download the binary from the Releases page. It is fully self-contained and can be run directly.  
