@@ -47,7 +47,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
     {
         ExitCommand = new RelayCommand(RequestExit);
         RevealCommand = new RelayCommand(() => RunReveal(), CanReveal);
-        MoveUpCommand = new RelayCommand(RunMoveUp, CanMoveUp);
+        MoveUpCommand = new RelayCommand(() => RunMoveUp(), CanMoveUp);
         RefreshSessionStatus();
     }
 
@@ -61,6 +61,15 @@ public sealed class PresentationStageViewModel : ViewModelBase
     {
         get => _moveUpAnimationRequest;
         private set => SetProperty(ref _moveUpAnimationRequest, value);
+    }
+    public bool AutoAdvanceEnabled => _loadedConfig.Presentation.AutoAdvanceEnabled;
+    public double AutoAdvanceIntervalSeconds
+    {
+        get
+        {
+            var interval = _loadedConfig.Presentation.AutoAdvanceIntervalSeconds;
+            return float.IsFinite(interval) ? Math.Clamp(interval, 0.1, 3600) : 1.0;
+        }
     }
     public double RowFlyAnimationSeconds => Math.Max(0.01, _loadedConfig.Presentation.RowFlyAnimationSeconds);
     public double ScrollAnimationSeconds => Math.Max(0.01, _loadedConfig.Presentation.ScrollAnimationSeconds);
@@ -145,6 +154,8 @@ public sealed class PresentationStageViewModel : ViewModelBase
 
         _contestState = contestState;
         _loadedConfig = config;
+        OnPropertyChanged(nameof(AutoAdvanceEnabled));
+        OnPropertyChanged(nameof(AutoAdvanceIntervalSeconds));
         OnPropertyChanged(nameof(RowFlyAnimationSeconds));
         OnPropertyChanged(nameof(ScrollAnimationSeconds));
         HideAwardOverlay();
@@ -200,23 +211,39 @@ public sealed class PresentationStageViewModel : ViewModelBase
 
     public void HandleSpacePressed()
     {
-        if (!IsInitialized || !IsStarted)
+        HandleManualStepRequested();
+    }
+
+    public bool HandleManualStepRequested()
+    {
+        return TryAdvanceStep(autoTriggered: false);
+    }
+
+    public bool HandleAutoStepRequested()
+    {
+        if (State == PresentationRowState.RowCompleteAwardShowing)
         {
-            return;
+            return false;
         }
 
-        // Template for your transition logic:
-        // - decide next state
-        // - decide whether to call Reveal or MoveUp
-        Trace.WriteLine($"[PresentationStageVM] StateBefore: state={State}, focusIndex={FocusedRowIndex}");
+        return TryAdvanceStep(autoTriggered: true);
+    }
+
+    private bool TryAdvanceStep(bool autoTriggered)
+    {
+        if (!IsInitialized || !IsStarted)
+        {
+            return false;
+        }
+
+        Trace.WriteLine($"[PresentationStageVM] StateBefore: state={State}, focusIndex={FocusedRowIndex}, auto={autoTriggered}");
         switch (State)
         {
             case PresentationRowState.RowInProgress:
                 if (FocusedRowIndex < 0 || FocusedRowIndex >= PreFreezeRows.Count)
                 {
                     Trace.WriteLine($"[PresentationStageVM] InvalidFocusIndex: focusIndex={FocusedRowIndex}, rowCount={PreFreezeRows.Count}");
-                    State = PresentationRowState.RowInProgress;
-                    break;
+                    return false;
                 }
 
                 var teamId = PreFreezeRows[FocusedRowIndex].TeamId;
@@ -246,7 +273,11 @@ public sealed class PresentationStageViewModel : ViewModelBase
                     else
                     {
                         Trace.WriteLine("[PresentationStageVM] Action: move_up");
-                        RunMoveUp();
+                        if (!RunMoveUp())
+                        {
+                            return false;
+                        }
+
                         State = PresentationRowState.RowInProgress;
                     }
                 }
@@ -262,13 +293,18 @@ public sealed class PresentationStageViewModel : ViewModelBase
                 State = PresentationRowState.RowCompleteReadyToAdvance;
                 break;
             case PresentationRowState.RowCompleteReadyToAdvance:
-                RunMoveUp();
+                if (!RunMoveUp())
+                {
+                    return false;
+                }
+
                 State = PresentationRowState.RowInProgress;
                 break;
             default:
                 throw new ArgumentOutOfRangeException();
         }
         Trace.WriteLine($"[PresentationStageVM] StateAfter: state={State}");
+        return true;
     }
 
     private void RequestExit()
@@ -398,21 +434,22 @@ public sealed class PresentationStageViewModel : ViewModelBase
         return outcome;
     }
 
-    private void RunMoveUp()
+    private bool RunMoveUp()
     {
         if (!CanMoveUp())
         {
-            return;
+            return false;
         }
 
         if (!MoveUp())
         {
-            return;
+            return false;
         }
 
         RevealCommand.NotifyCanExecuteChanged();
         MoveUpCommand.NotifyCanExecuteChanged();
         RefreshSessionStatus();
+        return true;
     }
 
     private bool CanReveal()

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Tomlyn.Model;
 
@@ -23,6 +24,8 @@ public sealed class PresentationConfig
     public string LogoExtension { get; set; } = "png";
     public string TeamPhotoExtension { get; set; } = "jpg";
     public string? TeamPhotoFallbackPath { get; set; }
+    public bool AutoAdvanceEnabled { get; set; }
+    public float AutoAdvanceIntervalSeconds { get; set; } = 1.0f;
 
     public static PresentationConfig FromToml(TomlTable table)
     {
@@ -48,7 +51,23 @@ public sealed class PresentationConfig
         if (table.TryGetValue("team_photo_fallback_path", out var fallbackPath) && fallbackPath is string fallback)
             config.TeamPhotoFallbackPath = fallback;
 
+        if (table.TryGetValue("auto_advance_enabled", out var autoAdvanceEnabled) && autoAdvanceEnabled is bool enabled)
+            config.AutoAdvanceEnabled = enabled;
+
+        if (table.TryGetValue("auto_advance_interval_seconds", out var autoAdvanceInterval))
+            config.AutoAdvanceIntervalSeconds = NormalizeAutoAdvanceInterval(
+                ConvertToFloat(autoAdvanceInterval, config.AutoAdvanceIntervalSeconds),
+                config.AutoAdvanceIntervalSeconds);
+
         return config;
+    }
+
+    private static float NormalizeAutoAdvanceInterval(float value, float fallback)
+    {
+        if (!float.IsFinite(value))
+            return fallback;
+
+        return Math.Clamp(value, 0.1f, 3600f);
     }
 
     private static float ConvertToFloat(object value, float fallback)

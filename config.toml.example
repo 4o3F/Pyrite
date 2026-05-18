@@ -8,3 +8,5 @@ row_fly_animation_seconds = 0.5
 logo_extension = "jpg"
 team_photo_extension = "jpg"
 team_photo_fallback_path = "/135769226_p0.png"
+auto_advance_enabled = false
+auto_advance_interval_seconds = 1.0

@@ -28,6 +28,7 @@ public partial class PresentationStageView : UserControl
     private DispatcherTimer? _scrollAnimationTimer;
     private DispatcherTimer? _moveUpAnimationTimer;
     private DispatcherTimer? _awardOverlayFadeTimer;
+    private DispatcherTimer? _autoAdvanceTimer;
     private ScrollViewer? _animatedScrollViewer;
     private long _animationStartTimestamp;
     private long _awardOverlayFadeStartTimestamp;
@@ -37,6 +38,7 @@ public partial class PresentationStageView : UserControl
     private double _awardOverlayFadeTargetOpacity;
     private bool _anchorRequestQueued;
     private bool _deferredRetryQueued;
+    private bool _isAttachedToVisualTree;
     private long _lastHandledMoveUpRequestId;
     private readonly List<ActiveMoveUpAnimation> _activeMoveUpAnimations = [];
     private readonly List<ActiveDownShiftAnimation> _activeDownShiftAnimations = [];
@@ -95,7 +97,14 @@ public partial class PresentationStageView : UserControl
             return;
         }
 
-        vm.HandleSpacePressed();
+        if (vm.HandleManualStepRequested())
+        {
+            ResetAutoAdvanceTimer();
+        }
+        else
+        {
+            UpdateAutoAdvanceTimer();
+        }
     }
 
     private void ToggleFullscreen()
@@ -112,13 +121,17 @@ public partial class PresentationStageView : UserControl
 
     private void OnAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
+        _isAttachedToVisualTree = true;
         Focus();
         SyncViewportToViewModel();
         RequestFocusedRowAnchor();
+        ResetAutoAdvanceTimer();
     }
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
+        _isAttachedToVisualTree = false;
+        StopAutoAdvanceTimer();
         StopScrollAnimation();
         StopAllMoveUpAnimations();
         StopAwardOverlayFadeAnimation();
@@ -126,6 +139,7 @@ public partial class PresentationStageView : UserControl
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
+        StopAutoAdvanceTimer();
         StopAllMoveUpAnimations();
         _lastHandledMoveUpRequestId = 0;
 
@@ -152,6 +166,7 @@ public partial class PresentationStageView : UserControl
 
         SyncViewportToViewModel();
         RequestFocusedRowAnchor();
+        ResetAutoAdvanceTimer();
     }
 
     private void OnViewSizeChanged(object? sender, SizeChangedEventArgs e)
@@ -199,6 +214,7 @@ public partial class PresentationStageView : UserControl
         {
             var isVisible = (DataContext as PresentationStageViewModel)?.IsAwardOverlayVisible ?? false;
             AnimateAwardOverlayVisibility(isVisible);
+            UpdateAutoAdvanceTimer();
             return;
         }
 
@@ -206,6 +222,15 @@ public partial class PresentationStageView : UserControl
         {
             HandleMoveUpAnimationRequest();
             return;
+        }
+
+        if (e.PropertyName == nameof(PresentationStageViewModel.State) ||
+            e.PropertyName == nameof(PresentationStageViewModel.IsInitialized) ||
+            e.PropertyName == nameof(PresentationStageViewModel.IsStarted) ||
+            e.PropertyName == nameof(PresentationStageViewModel.AutoAdvanceEnabled) ||
+            e.PropertyName == nameof(PresentationStageViewModel.AutoAdvanceIntervalSeconds))
+        {
+            UpdateAutoAdvanceTimer();
         }
 
         if (!string.IsNullOrEmpty(e.PropertyName) &&
@@ -221,6 +246,74 @@ public partial class PresentationStageView : UserControl
         }
 
         RequestFocusedRowAnchor();
+    }
+
+    private void UpdateAutoAdvanceTimer()
+    {
+        if (DataContext is not PresentationStageViewModel vm || !CanRunAutoAdvance(vm))
+        {
+            StopAutoAdvanceTimer();
+            return;
+        }
+
+        StartAutoAdvanceTimer(vm);
+    }
+
+    private void ResetAutoAdvanceTimer()
+    {
+        StopAutoAdvanceTimer();
+        if (DataContext is PresentationStageViewModel vm && CanRunAutoAdvance(vm))
+        {
+            StartAutoAdvanceTimer(vm);
+        }
+    }
+
+    private void StartAutoAdvanceTimer(PresentationStageViewModel vm)
+    {
+        if (_autoAdvanceTimer is null)
+        {
+            _autoAdvanceTimer = new DispatcherTimer(
+                TimeSpan.FromSeconds(vm.AutoAdvanceIntervalSeconds),
+                DispatcherPriority.Background,
+                OnAutoAdvanceTick);
+        }
+
+        _autoAdvanceTimer.Interval = TimeSpan.FromSeconds(vm.AutoAdvanceIntervalSeconds);
+        if (!_autoAdvanceTimer.IsEnabled)
+        {
+            _autoAdvanceTimer.Start();
+        }
+    }
+
+    private void StopAutoAdvanceTimer()
+    {
+        _autoAdvanceTimer?.Stop();
+    }
+
+    private void OnAutoAdvanceTick(object? sender, EventArgs e)
+    {
+        if (DataContext is not PresentationStageViewModel vm)
+        {
+            StopAutoAdvanceTimer();
+            return;
+        }
+
+        if (vm.HandleAutoStepRequested())
+        {
+            ResetAutoAdvanceTimer();
+            return;
+        }
+
+        StopAutoAdvanceTimer();
+    }
+
+    private bool CanRunAutoAdvance(PresentationStageViewModel vm)
+    {
+        return _isAttachedToVisualTree &&
+               vm.AutoAdvanceEnabled &&
+               vm.IsInitialized &&
+               vm.IsStarted &&
+               vm.State != PresentationRowState.RowCompleteAwardShowing;
     }
 
     private void HandleMoveUpAnimationRequest()
