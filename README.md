@@ -34,7 +34,28 @@ Next, configure the awards in the GUI. The `Gold`, `Silver`, and `Bronze` medal-
 When the resolver presentation is running:
 
 * Press `F12` to toggle full screen.
-* Press `Space` to advance the resolution process.
+* Press `Space` or left-click to advance the resolution process.
+
+To reveal medals in batches with one click per batch, add these settings to the CDP's `config.toml`:
+
+```toml
+[presentation]
+skip_no_medal = true
+auto_advance_enabled = true
+auto_advance_interval_seconds = 1.0
+auto_advance_award_interval_seconds = 5.0
+auto_advance_batch_size = 12
+```
+
+The presentation waits for a click or `Space` before each batch. It then resolves submissions, updates rankings, and shows each team's award page automatically. Only teams receiving a bronze, silver, or gold medal count toward the batch size; extra awards for the same team do not add to the count. Both the GUI's IDs (`medal-bronze`, `medal-silver`, `medal-gold`) and DOMjudge's IDs (`bronze-medal`, `silver-medal`, `gold-medal`) are recognized. GUI medal assignments take precedence for each tier when both forms exist. Teams without pending submissions still receive their awards.
+
+With `skip_no_medal = true`, ranks below the last medal recipient in the final standings are resolved silently before the presentation starts. The scoreboard keeps all teams, with focus starting at the last medal rank. Without this setting, resolution starts at the lowest row with pending submissions or an award.
+
+`auto_advance_interval_seconds` controls ordinary resolution steps. `auto_advance_award_interval_seconds` controls how long each team's photo and award page stays fully visible after the fade-in (default: 5 seconds). The last award page of a batch also uses this interval, then closes automatically so the presentation pauses on the scoreboard.
+
+Batch endpoints are calculated when the presentation launches, using the current medal assignments (including a reloaded `awards.json`) and final standings, from the lowest rank upward within each tier. Each batch returns to the scoreboard and pauses with focus on its last team when the requested number of medals has been shown **or that medal tier is finished**, whichever comes first. For example, 23 bronze recipients with a batch size of 12 produce batches of 12 and 11. The next click starts the next batch and moves focus upward; silver starts with a fresh count. Additional clicks during a running batch are ignored.
+
+Omitting `auto_advance_batch_size` (or setting it to `0`) preserves the existing automatic mode, which pauses at every award page. Setting `auto_advance_enabled = false` keeps manual stepping.
 
 Animation speed is configured in the `config.toml` file and cannot be changed during the presentation. Be sure to test everything beforehand.
 

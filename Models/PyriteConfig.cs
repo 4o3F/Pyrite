@@ -24,8 +24,11 @@ public sealed class PresentationConfig
     public string LogoExtension { get; set; } = "png";
     public string TeamPhotoExtension { get; set; } = "jpg";
     public string? TeamPhotoFallbackPath { get; set; }
+    public bool SkipNoMedal { get; set; }
     public bool AutoAdvanceEnabled { get; set; }
     public float AutoAdvanceIntervalSeconds { get; set; } = 1.0f;
+    public float AutoAdvanceAwardIntervalSeconds { get; set; } = 5.0f;
+    public int AutoAdvanceBatchSize { get; set; }
 
     public static PresentationConfig FromToml(TomlTable table)
     {
@@ -51,6 +54,9 @@ public sealed class PresentationConfig
         if (table.TryGetValue("team_photo_fallback_path", out var fallbackPath) && fallbackPath is string fallback)
             config.TeamPhotoFallbackPath = fallback;
 
+        if (table.TryGetValue("skip_no_medal", out var skipNoMedal) && skipNoMedal is bool skip)
+            config.SkipNoMedal = skip;
+
         if (table.TryGetValue("auto_advance_enabled", out var autoAdvanceEnabled) && autoAdvanceEnabled is bool enabled)
             config.AutoAdvanceEnabled = enabled;
 
@@ -58,6 +64,14 @@ public sealed class PresentationConfig
             config.AutoAdvanceIntervalSeconds = NormalizeAutoAdvanceInterval(
                 ConvertToFloat(autoAdvanceInterval, config.AutoAdvanceIntervalSeconds),
                 config.AutoAdvanceIntervalSeconds);
+
+        if (table.TryGetValue("auto_advance_award_interval_seconds", out var awardInterval))
+            config.AutoAdvanceAwardIntervalSeconds = NormalizeAutoAdvanceInterval(
+                ConvertToFloat(awardInterval, config.AutoAdvanceAwardIntervalSeconds),
+                config.AutoAdvanceAwardIntervalSeconds);
+
+        if (table.TryGetValue("auto_advance_batch_size", out var autoAdvanceBatchSize) && autoAdvanceBatchSize is long batchSize)
+            config.AutoAdvanceBatchSize = (int)Math.Clamp(batchSize, 0L, int.MaxValue);
 
         return config;
     }

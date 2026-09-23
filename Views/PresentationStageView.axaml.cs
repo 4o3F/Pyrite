@@ -224,11 +224,11 @@ public partial class PresentationStageView : UserControl
             return;
         }
 
-        if (e.PropertyName == nameof(PresentationStageViewModel.State) ||
-            e.PropertyName == nameof(PresentationStageViewModel.IsInitialized) ||
-            e.PropertyName == nameof(PresentationStageViewModel.IsStarted) ||
-            e.PropertyName == nameof(PresentationStageViewModel.AutoAdvanceEnabled) ||
-            e.PropertyName == nameof(PresentationStageViewModel.AutoAdvanceIntervalSeconds))
+        if (e.PropertyName == nameof(PresentationStageViewModel.CurrentAutoAdvanceIntervalSeconds))
+        {
+            ResetAutoAdvanceTimer();
+        }
+        else if (e.PropertyName == nameof(PresentationStageViewModel.CanAutoAdvance))
         {
             UpdateAutoAdvanceTimer();
         }
@@ -273,12 +273,12 @@ public partial class PresentationStageView : UserControl
         if (_autoAdvanceTimer is null)
         {
             _autoAdvanceTimer = new DispatcherTimer(
-                TimeSpan.FromSeconds(vm.AutoAdvanceIntervalSeconds),
+                TimeSpan.FromSeconds(vm.CurrentAutoAdvanceIntervalSeconds),
                 DispatcherPriority.Background,
                 OnAutoAdvanceTick);
         }
 
-        _autoAdvanceTimer.Interval = TimeSpan.FromSeconds(vm.AutoAdvanceIntervalSeconds);
+        _autoAdvanceTimer.Interval = TimeSpan.FromSeconds(vm.CurrentAutoAdvanceIntervalSeconds);
         if (!_autoAdvanceTimer.IsEnabled)
         {
             _autoAdvanceTimer.Start();
@@ -292,11 +292,15 @@ public partial class PresentationStageView : UserControl
 
     private void OnAutoAdvanceTick(object? sender, EventArgs e)
     {
-        if (DataContext is not PresentationStageViewModel vm)
+        if (DataContext is not PresentationStageViewModel vm || !CanRunAutoAdvance(vm))
         {
             StopAutoAdvanceTimer();
             return;
         }
+
+        if (_scrollAnimationTimer?.IsEnabled == true ||
+            _moveUpAnimationTimer?.IsEnabled == true)
+            return;
 
         if (vm.HandleAutoStepRequested())
         {
@@ -309,11 +313,7 @@ public partial class PresentationStageView : UserControl
 
     private bool CanRunAutoAdvance(PresentationStageViewModel vm)
     {
-        return _isAttachedToVisualTree &&
-               vm.AutoAdvanceEnabled &&
-               vm.IsInitialized &&
-               vm.IsStarted &&
-               vm.State != PresentationRowState.RowCompleteAwardShowing;
+        return _isAttachedToVisualTree && vm.CanAutoAdvance && _awardOverlayFadeTimer?.IsEnabled != true;
     }
 
     private void HandleMoveUpAnimationRequest()
@@ -862,6 +862,8 @@ public partial class PresentationStageView : UserControl
             AwardOverlayRoot.Opacity = _awardOverlayFadeTargetOpacity;
             AwardOverlayRoot.IsVisible = _awardOverlayFadeTargetOpacity > 0;
             _awardOverlayFadeTimer.Stop();
+            // Give the fully visible award page its own complete display interval.
+            ResetAutoAdvanceTimer();
         }
     }
 

@@ -8,5 +8,12 @@ row_fly_animation_seconds = 0.5
 logo_extension = "jpg"
 team_photo_extension = "jpg"
 team_photo_fallback_path = "/135769226_p0.png"
+# Silently resolve the ranks below the last medal recipient before presentation starts.
+skip_no_medal = true
 auto_advance_enabled = false
 auto_advance_interval_seconds = 1.0
+# Time to show each award page after its fade-in, separate from normal resolution steps.
+auto_advance_award_interval_seconds = 5.0
+# Set auto_advance_enabled = true and a positive batch size for click-to-start medal batches.
+# 0 preserves automatic stepping with a pause at every award page.
+auto_advance_batch_size = 12
