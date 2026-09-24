@@ -1,0 +1,67 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Pyrite.ViewModels"
+             x:Class="Pyrite.Views.BatchAwardView"
+             x:DataType="vm:BatchAwardViewModel">
+    <UserControl.Resources>
+        <DataTemplate x:Key="BatchTeamCard" x:DataType="vm:BatchAwardTeamViewModel">
+            <Grid Height="148" Margin="0,6" ColumnDefinitions="96,*" ColumnSpacing="12">
+                <Border Grid.Column="0" Width="96" Height="96"
+                        CornerRadius="48" Background="#25282D" VerticalAlignment="Center">
+                    <Image Width="96" Height="96" Source="{Binding AffiliationLogoImage}"
+                           Stretch="UniformToFill">
+                        <Image.Clip>
+                            <EllipseGeometry Center="48,48" RadiusX="48" RadiusY="48" />
+                        </Image.Clip>
+                    </Image>
+                </Border>
+                <Border Grid.Column="1" Height="140" CornerRadius="6"
+                        IsVisible="{Binding HasTeamPhoto}"
+                        VerticalAlignment="Center" ClipToBounds="True">
+                    <Image Source="{Binding TeamPhotoImage}" Stretch="Uniform" />
+                </Border>
+            </Grid>
+        </DataTemplate>
+        <DataTemplate x:Key="BatchTeamName" x:DataType="vm:BatchAwardTeamViewModel">
+            <Border Padding="0,10">
+                <StackPanel>
+                    <!-- Keep wrapped lines together, with one divider after the complete name. -->
+                    <TextBlock Text="{Binding TeamName}" Foreground="#E2E4E8"
+                               FontSize="56" FontWeight="SemiBold" Padding="0,4,0,8"
+                               TextAlignment="Center" TextWrapping="Wrap" />
+                    <Border Height="1" Margin="64,14,64,2"
+                            HorizontalAlignment="Stretch" Background="#4A4F59" />
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Border Background="#111215">
+        <Viewbox Stretch="Uniform">
+            <Grid Width="1920" Height="{Binding CanvasHeight}">
+                <Grid Margin="48" ColumnDefinitions="400,*,400" ColumnSpacing="32">
+                    <ItemsControl Grid.Column="0" ItemsSource="{Binding LeftTeams}"
+                                  ItemTemplate="{StaticResource BatchTeamCard}"
+                                  VerticalAlignment="Center" />
+
+                    <Border Grid.Column="1" Padding="16,24"
+                            BorderBrush="#30333A" BorderThickness="1,0">
+                        <Grid x:Name="NamesViewport" ClipToBounds="True">
+                            <StackPanel x:Name="NamesStrip" VerticalAlignment="Top">
+                                <ItemsControl x:Name="BatchNames" ItemsSource="{Binding Teams}"
+                                              ItemTemplate="{StaticResource BatchTeamName}" />
+                                <!-- The second copy joins the first for a continuous loop. -->
+                                <ItemsControl x:Name="RepeatedBatchNames" ItemsSource="{Binding Teams}"
+                                              ItemTemplate="{StaticResource BatchTeamName}" IsVisible="False" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <ItemsControl Grid.Column="2" ItemsSource="{Binding RightTeams}"
+                                  ItemTemplate="{StaticResource BatchTeamCard}"
+                                  VerticalAlignment="Center" />
+                </Grid>
+            </Grid>
+        </Viewbox>
+    </Border>
+</UserControl>

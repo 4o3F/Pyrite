@@ -19,6 +19,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
     private const double AwardBackgroundDecodeViewportScale = 1.2;
     private const int ScoreboardLogoDecodeWidth = 96;
     private const int AwardAffiliationLogoDecodeWidth = 256;
+    private const int BatchTeamPhotoDecodeWidth = 384;
     private const int MaxLogoCacheItems = 512;
     private const long MaxLogoCacheApproxBytes = 64L * 1024 * 1024;
 
@@ -34,6 +35,8 @@ public sealed class PresentationStageViewModel : ViewModelBase
     private bool _isInitialized;
     private bool _isStarted;
     private bool _isAutoAdvanceBatchActive;
+    private BatchAwardViewModel? _batchAward;
+    private readonly List<string> _currentBatchTeamIds = [];
     private readonly Dictionary<string, string> _medalByTeamId = new(StringComparer.Ordinal);
     private readonly HashSet<string> _autoAdvanceBatchEndTeamIds = new(StringComparer.Ordinal);
     private PyriteConfig _loadedConfig = PyriteConfig.Default();
@@ -68,8 +71,22 @@ public sealed class PresentationStageViewModel : ViewModelBase
     public bool AutoAdvanceEnabled => _loadedConfig.Presentation.AutoAdvanceEnabled;
     public int AutoAdvanceBatchSize => Math.Max(0, _loadedConfig.Presentation.AutoAdvanceBatchSize);
     private bool IsAutoAdvanceBatchEnabled => AutoAdvanceEnabled && AutoAdvanceBatchSize > 0;
-    public bool CanAutoAdvance => IsInitialized && IsStarted && AutoAdvanceEnabled &&
+    private bool IsBatchAwardPageEnabled => IsAutoAdvanceBatchEnabled && _loadedConfig.Presentation.BatchAwardPageEnabled;
+    public bool CanAutoAdvance => IsInitialized && IsStarted && AutoAdvanceEnabled && !IsBatchAwardVisible &&
         (IsAutoAdvanceBatchEnabled ? IsAutoAdvanceBatchActive : State != PresentationRowState.RowCompleteAwardShowing);
+    public BatchAwardViewModel? BatchAward
+    {
+        get => _batchAward;
+        private set
+        {
+            if (SetProperty(ref _batchAward, value))
+            {
+                OnPropertyChanged(nameof(IsBatchAwardVisible));
+                OnPropertyChanged(nameof(CanAutoAdvance));
+            }
+        }
+    }
+    public bool IsBatchAwardVisible => BatchAward is not null;
     public bool IsAutoAdvanceBatchActive
     {
         get => _isAutoAdvanceBatchActive;
@@ -225,6 +242,8 @@ public sealed class PresentationStageViewModel : ViewModelBase
     {
         IsAutoAdvanceBatchActive = false;
         IsStarted = false;
+        ClearBatchAward();
+        _currentBatchTeamIds.Clear();
         RevealCommand.NotifyCanExecuteChanged();
         MoveUpCommand.NotifyCanExecuteChanged();
         RefreshSessionStatus();
@@ -258,6 +277,14 @@ public sealed class PresentationStageViewModel : ViewModelBase
         if (!IsInitialized || !IsStarted)
             return false;
 
+        if (IsBatchAwardVisible)
+        {
+            ClearBatchAward();
+            // The final batch returns to the completed scoreboard without starting another batch.
+            if (FocusedRowIndex == 0)
+                return true;
+        }
+
         if (IsAutoAdvanceBatchEnabled)
         {
             // Repeated clicks must not skip steps within a running batch.
@@ -265,6 +292,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
                 (State == PresentationRowState.RowCompleteReadyToAdvance && FocusedRowIndex == 0))
                 return false;
 
+            _currentBatchTeamIds.Clear();
             IsAutoAdvanceBatchActive = true;
         }
 
@@ -325,6 +353,10 @@ public sealed class PresentationStageViewModel : ViewModelBase
                     Trace.WriteLine($"[PresentationStageVM] TeamNoPendingReveal: focusIndex={FocusedRowIndex}");
                     if (HasAwards(teamId))
                     {
+                        if (IsBatchAwardPageEnabled && _medalByTeamId.ContainsKey(teamId) &&
+                            !_currentBatchTeamIds.Contains(teamId))
+                            _currentBatchTeamIds.Add(teamId);
+
                         ShowAwardOverlay(teamId);
                         State = PresentationRowState.RowCompleteAwardShowing;
                     }
@@ -349,8 +381,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
             case PresentationRowState.RowCompleteAwardShowing:
                 HideAwardOverlay();
                 State = PresentationRowState.RowCompleteReadyToAdvance;
-                // Let the final award page finish its display interval, then pause on
-                // the scoreboard before moving focus to the next batch's first team.
+                // Let the final individual award page finish before pausing at the batch boundary.
                 PauseAtMedalBatchBoundary(PreFreezeRows[FocusedRowIndex].TeamId);
                 break;
             case PresentationRowState.RowCompleteReadyToAdvance:
@@ -421,7 +452,41 @@ public sealed class PresentationStageViewModel : ViewModelBase
     {
         if (IsAutoAdvanceBatchEnabled &&
             (_autoAdvanceBatchEndTeamIds.Contains(teamId) || FocusedRowIndex == 0))
+        {
             IsAutoAdvanceBatchActive = false;
+            ShowBatchAward();
+        }
+    }
+
+    private void ShowBatchAward()
+    {
+        if (!IsBatchAwardPageEnabled || _contestState is null || _currentBatchTeamIds.Count == 0)
+            return;
+
+        ClearBatchAward();
+        var teams = new List<BatchAwardTeamViewModel>();
+        foreach (var teamId in _currentBatchTeamIds)
+        {
+            var row = PreFreezeRows.FirstOrDefault(item => item.TeamId == teamId);
+            if (row is null)
+                continue;
+
+            _contestState.Teams.TryGetValue(teamId, out var team);
+            var teamName = !string.IsNullOrWhiteSpace(team?.DisplayName) ? team.DisplayName : row.TeamName;
+            var photoPath = BuildTeamPhotoPath(teamId, useFallback: false);
+            var photo = photoPath is null ? null : LoadBitmapDecodedToWidth(photoPath, BatchTeamPhotoDecodeWidth);
+            teams.Add(new BatchAwardTeamViewModel(teamName, row.TeamLogoImage, photo));
+        }
+
+        if (teams.Count > 0)
+            BatchAward = new BatchAwardViewModel(teams, _loadedConfig.Presentation.BatchNameScrollCycleSeconds);
+    }
+
+    private void ClearBatchAward()
+    {
+        var previous = BatchAward;
+        BatchAward = null;
+        previous?.Dispose();
     }
 
     private void InitializePresentationRows(ContestState contestState)
@@ -695,7 +760,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
         return builder.ToString().TrimEnd();
     }
 
-    private string? BuildTeamPhotoPath(string teamId)
+    private string? BuildTeamPhotoPath(string teamId, bool useFallback = true)
     {
         var teamPhotoExtension = _loadedConfig.Presentation.TeamPhotoExtension?.Trim().TrimStart('.');
         if (!string.IsNullOrWhiteSpace(_dataPath) &&
@@ -708,6 +773,9 @@ public sealed class PresentationStageViewModel : ViewModelBase
                 return primaryPath;
             }
         }
+
+        if (!useFallback)
+            return null;
 
         var fallbackPath = _loadedConfig.Presentation.TeamPhotoFallbackPath;
         if (string.IsNullOrWhiteSpace(fallbackPath))

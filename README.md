@@ -45,17 +45,26 @@ auto_advance_enabled = true
 auto_advance_interval_seconds = 1.0
 auto_advance_award_interval_seconds = 5.0
 auto_advance_batch_size = 12
+# Optional: show the collective award page after each batch (default: false).
+batch_award_page_enabled = true
+batch_name_scroll_cycle_seconds = 30.0
 ```
 
 The presentation waits for a click or `Space` before each batch. It then resolves submissions, updates rankings, and shows each team's award page automatically. Only teams receiving a bronze, silver, or gold medal count toward the batch size; extra awards for the same team do not add to the count. Both the GUI's IDs (`medal-bronze`, `medal-silver`, `medal-gold`) and DOMjudge's IDs (`bronze-medal`, `silver-medal`, `gold-medal`) are recognized. GUI medal assignments take precedence for each tier when both forms exist. Teams without pending submissions still receive their awards.
 
 With `skip_no_medal = true`, ranks below the last medal recipient in the final standings are resolved silently before the presentation starts. The scoreboard keeps all teams, with focus starting at the last medal rank. Without this setting, resolution starts at the lowest row with pending submissions or an award.
 
-`auto_advance_interval_seconds` controls ordinary resolution steps. `auto_advance_award_interval_seconds` controls how long each team's photo and award page stays fully visible after the fade-in (default: 5 seconds). The last award page of a batch also uses this interval, then closes automatically so the presentation pauses on the scoreboard.
+`auto_advance_interval_seconds` controls ordinary resolution steps. `auto_advance_award_interval_seconds` controls how long each team's photo and award page stays fully visible after the fade-in (default: 5 seconds). The last award page of a batch also uses this interval, then closes automatically so the presentation pauses on the scoreboard, or on the collective award page when enabled.
 
-Batch endpoints are calculated when the presentation launches, using the current medal assignments (including a reloaded `awards.json`) and final standings, from the lowest rank upward within each tier. Each batch returns to the scoreboard and pauses with focus on its last team when the requested number of medals has been shown **or that medal tier is finished**, whichever comes first. For example, 23 bronze recipients with a batch size of 12 produce batches of 12 and 11. The next click starts the next batch and moves focus upward; silver starts with a fresh count. Additional clicks during a running batch are ignored.
+Batch endpoints are calculated when the presentation launches, using the current medal assignments (including a reloaded `awards.json`) and final standings, from the lowest rank upward within each tier. Each batch pauses when the requested number of medals has been shown **or that medal tier is finished**, whichever comes first. For example, 23 bronze recipients with a batch size of 12 produce batches of 12 and 11. By default, each batch pauses on the scoreboard, and the next click starts the next batch. Silver starts with a fresh count.
+
+Set `batch_award_page_enabled = true` to show a collective award page at each batch boundary. It defaults to `false` and requires `auto_advance_enabled = true` with a positive `auto_advance_batch_size`. Omitting it or setting it to `false` keeps the scoreboard pause and does not change medal batch counting.
+
+The optional collective award page shows the actual recipients of that batch in reveal order, with circular school logos and team photos on either side of a wide name list. Names use large text and natural line heights without shrinking to fit the column, with a thin divider after each complete name. When the list fits, it stays centered and still; when it overflows, it pauses for two seconds before scrolling upward in a continuous loop. Each new batch starts from the first name. The side columns contain no text, and the middle has no medal or team-count heading. Photos have no background fill. Missing or unreadable team photos are hidden, including their frames; this page does not substitute fallback images or school logos for photos. The page fades in and out over 350 ms. The next click fades it out, then returns to the scoreboard and starts the next batch. After the final batch, clicking fades back to the completed scoreboard. Additional clicks during a transition or a running batch are ignored.
 
 Omitting `auto_advance_batch_size` (or setting it to `0`) preserves the existing automatic mode, which pauses at every award page. Setting `auto_advance_enabled = false` keeps manual stepping.
+
+`batch_name_scroll_cycle_seconds` sets the time for one complete loop of all names on the collective award page (default: 30 seconds, range: 0.1–3600 seconds). The scroll speed is the measured height of one complete name list divided by this duration, including wrapped lines, dividers and spacing. The initial two-second pause is separate. A larger value scrolls more slowly; lists that fit stay still.
 
 Animation speed is configured in the `config.toml` file and cannot be changed during the presentation. Be sure to test everything beforehand.
 

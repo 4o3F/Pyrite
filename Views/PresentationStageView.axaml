@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
 			 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
 			 xmlns:vm="using:Pyrite.ViewModels"
+			 xmlns:views="using:Pyrite.Views"
 			 x:Class="Pyrite.Views.PresentationStageView"
 			 x:DataType="vm:PresentationStageViewModel"
 			 Focusable="True">
@@ -168,6 +169,10 @@
 					</Grid>
 				</Viewbox>
 			</Border>
+		</Grid>
+		<Grid x:Name="BatchAwardOverlayRoot" Grid.RowSpan="2" Panel.ZIndex="6000"
+			  IsVisible="False" Opacity="0">
+			<views:BatchAwardView DataContext="{Binding BatchAward}" />
 		</Grid>
 	</Grid>
 </UserControl>

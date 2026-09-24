@@ -21,6 +21,7 @@ public partial class PresentationStageView : UserControl
     private const double ScrollEpsilon = 0.5;
     private static readonly TimeSpan FocusScrollDuration = TimeSpan.FromMilliseconds(180);
     private static readonly TimeSpan AwardOverlayFadeDuration = TimeSpan.FromMilliseconds(260);
+    private static readonly TimeSpan BatchAwardFadeDuration = TimeSpan.FromMilliseconds(350);
     private const double DefaultRowFlyAnimationSeconds = 0.6;
     private const double DefaultScrollAnimationSeconds = 0.4;
 
@@ -28,14 +29,19 @@ public partial class PresentationStageView : UserControl
     private DispatcherTimer? _scrollAnimationTimer;
     private DispatcherTimer? _moveUpAnimationTimer;
     private DispatcherTimer? _awardOverlayFadeTimer;
+    private DispatcherTimer? _batchAwardFadeTimer;
     private DispatcherTimer? _autoAdvanceTimer;
     private ScrollViewer? _animatedScrollViewer;
     private long _animationStartTimestamp;
     private long _awardOverlayFadeStartTimestamp;
+    private long _batchAwardFadeStartTimestamp;
     private double _animationStartOffsetY;
     private double _animationTargetOffsetY;
     private double _awardOverlayFadeStartOpacity;
     private double _awardOverlayFadeTargetOpacity;
+    private double _batchAwardFadeStartOpacity;
+    private double _batchAwardFadeTargetOpacity;
+    private PresentationStageViewModel? _batchAdvanceAfterFade;
     private bool _anchorRequestQueued;
     private bool _deferredRetryQueued;
     private bool _isAttachedToVisualTree;
@@ -92,11 +98,25 @@ public partial class PresentationStageView : UserControl
 
     private void HandleStepRequested()
     {
-        if (DataContext is not PresentationStageViewModel vm)
+        if (DataContext is not PresentationStageViewModel vm || _batchAwardFadeTimer?.IsEnabled == true)
         {
             return;
         }
 
+        if (vm.IsBatchAwardVisible)
+        {
+            // Keep the batch data and photos alive until the fade-out finishes.
+            _batchAdvanceAfterFade = vm;
+            StopAutoAdvanceTimer();
+            AnimateBatchAwardOverlayVisibility(false);
+            return;
+        }
+
+        AdvanceManualStep(vm);
+    }
+
+    private void AdvanceManualStep(PresentationStageViewModel vm)
+    {
         if (vm.HandleManualStepRequested())
         {
             ResetAutoAdvanceTimer();
@@ -122,6 +142,7 @@ public partial class PresentationStageView : UserControl
     private void OnAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
         _isAttachedToVisualTree = true;
+        SetBatchAwardOverlayVisibilityImmediate((DataContext as PresentationStageViewModel)?.IsBatchAwardVisible ?? false);
         Focus();
         SyncViewportToViewModel();
         RequestFocusedRowAnchor();
@@ -135,6 +156,7 @@ public partial class PresentationStageView : UserControl
         StopScrollAnimation();
         StopAllMoveUpAnimations();
         StopAwardOverlayFadeAnimation();
+        StopBatchAwardFadeAnimation();
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
@@ -158,10 +180,12 @@ public partial class PresentationStageView : UserControl
         if (DataContext is PresentationStageViewModel vm)
         {
             SetAwardOverlayVisibilityImmediate(vm.IsAwardOverlayVisible);
+            SetBatchAwardOverlayVisibilityImmediate(vm.IsBatchAwardVisible);
         }
         else
         {
             SetAwardOverlayVisibilityImmediate(false);
+            SetBatchAwardOverlayVisibilityImmediate(false);
         }
 
         SyncViewportToViewModel();
@@ -210,6 +234,18 @@ public partial class PresentationStageView : UserControl
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(PresentationStageViewModel.IsBatchAwardVisible))
+        {
+            var isVisible = (DataContext as PresentationStageViewModel)?.IsBatchAwardVisible ?? false;
+            if (isVisible)
+                AnimateBatchAwardOverlayVisibility(true);
+            else
+                SetBatchAwardOverlayVisibilityImmediate(false);
+
+            UpdateAutoAdvanceTimer();
+            return;
+        }
+
         if (e.PropertyName == nameof(PresentationStageViewModel.IsAwardOverlayVisible))
         {
             var isVisible = (DataContext as PresentationStageViewModel)?.IsAwardOverlayVisible ?? false;
@@ -313,7 +349,8 @@ public partial class PresentationStageView : UserControl
 
     private bool CanRunAutoAdvance(PresentationStageViewModel vm)
     {
-        return _isAttachedToVisualTree && vm.CanAutoAdvance && _awardOverlayFadeTimer?.IsEnabled != true;
+        return _isAttachedToVisualTree && vm.CanAutoAdvance &&
+               _awardOverlayFadeTimer?.IsEnabled != true && _batchAwardFadeTimer?.IsEnabled != true;
     }
 
     private void HandleMoveUpAnimationRequest()
@@ -880,6 +917,67 @@ public partial class PresentationStageView : UserControl
         StopAwardOverlayFadeAnimation();
         AwardOverlayRoot.IsVisible = visible;
         AwardOverlayRoot.Opacity = visible ? 1 : 0;
+    }
+
+    private void AnimateBatchAwardOverlayVisibility(bool visible)
+    {
+        _batchAwardFadeStartOpacity = BatchAwardOverlayRoot.Opacity;
+        _batchAwardFadeTargetOpacity = visible ? 1 : 0;
+        _batchAwardFadeStartTimestamp = Stopwatch.GetTimestamp();
+        if (visible)
+        {
+            _batchAdvanceAfterFade = null;
+            BatchAwardOverlayRoot.IsVisible = true;
+        }
+
+        if (_batchAwardFadeTimer is null)
+        {
+            _batchAwardFadeTimer = new DispatcherTimer(DispatcherPriority.Render)
+            {
+                Interval = TimeSpan.FromMilliseconds(16)
+            };
+            _batchAwardFadeTimer.Tick += OnBatchAwardFadeTick;
+        }
+
+        _batchAwardFadeTimer.Stop();
+        _batchAwardFadeTimer.Start();
+    }
+
+    private void OnBatchAwardFadeTick(object? sender, EventArgs e)
+    {
+        if (_batchAwardFadeTimer?.IsEnabled != true)
+            return;
+
+        var progress = ComputeAnimationProgress(_batchAwardFadeStartTimestamp, BatchAwardFadeDuration.TotalSeconds);
+        BatchAwardOverlayRoot.Opacity = _batchAwardFadeStartOpacity +
+            ((_batchAwardFadeTargetOpacity - _batchAwardFadeStartOpacity) * EaseInOutCubic(progress));
+        if (progress < 1)
+            return;
+
+        BatchAwardOverlayRoot.Opacity = _batchAwardFadeTargetOpacity;
+        BatchAwardOverlayRoot.IsVisible = _batchAwardFadeTargetOpacity > 0;
+        var advanceAfterFade = _batchAdvanceAfterFade;
+        StopBatchAwardFadeAnimation();
+
+        // Only the session that requested dismissal may continue, and only after it is hidden.
+        if (_isAttachedToVisualTree && advanceAfterFade is not null &&
+            ReferenceEquals(DataContext, advanceAfterFade) && advanceAfterFade.IsBatchAwardVisible)
+            AdvanceManualStep(advanceAfterFade);
+        else
+            ResetAutoAdvanceTimer();
+    }
+
+    private void StopBatchAwardFadeAnimation()
+    {
+        _batchAwardFadeTimer?.Stop();
+        _batchAdvanceAfterFade = null;
+    }
+
+    private void SetBatchAwardOverlayVisibilityImmediate(bool visible)
+    {
+        StopBatchAwardFadeAnimation();
+        BatchAwardOverlayRoot.IsVisible = visible;
+        BatchAwardOverlayRoot.Opacity = visible ? 1 : 0;
     }
 
     private void CompleteMoveUpAnimation(ActiveMoveUpAnimation animation)
