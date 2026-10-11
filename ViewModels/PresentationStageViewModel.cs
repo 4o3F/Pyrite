@@ -38,6 +38,8 @@ public sealed class PresentationStageViewModel : ViewModelBase
     private BatchAwardViewModel? _batchAward;
     private readonly List<string> _currentBatchTeamIds = [];
     private readonly Dictionary<string, string> _medalByTeamId = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _batchSizeByGroup = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _batchTeamIds = new(StringComparer.Ordinal);
     private readonly HashSet<string> _autoAdvanceBatchEndTeamIds = new(StringComparer.Ordinal);
     private PyriteConfig _loadedConfig = PyriteConfig.Default();
     private readonly Dictionary<string, Queue<string>> _pendingRevealsByTeamId = new(StringComparer.Ordinal);
@@ -69,8 +71,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
         private set => SetProperty(ref _moveUpAnimationRequest, value);
     }
     public bool AutoAdvanceEnabled => _loadedConfig.Presentation.AutoAdvanceEnabled;
-    public int AutoAdvanceBatchSize => Math.Max(0, _loadedConfig.Presentation.AutoAdvanceBatchSize);
-    private bool IsAutoAdvanceBatchEnabled => AutoAdvanceEnabled && AutoAdvanceBatchSize > 0;
+    private bool IsAutoAdvanceBatchEnabled => AutoAdvanceEnabled && _batchTeamIds.Count > 0;
     private bool IsBatchAwardPageEnabled => IsAutoAdvanceBatchEnabled && _loadedConfig.Presentation.BatchAwardPageEnabled;
     public bool CanAutoAdvance => IsInitialized && IsStarted && AutoAdvanceEnabled && !IsBatchAwardVisible &&
         (IsAutoAdvanceBatchEnabled ? IsAutoAdvanceBatchActive : State != PresentationRowState.RowCompleteAwardShowing);
@@ -201,7 +202,6 @@ public sealed class PresentationStageViewModel : ViewModelBase
         _contestState = contestState;
         _loadedConfig = config;
         OnPropertyChanged(nameof(AutoAdvanceEnabled));
-        OnPropertyChanged(nameof(AutoAdvanceBatchSize));
         OnPropertyChanged(nameof(AutoAdvanceIntervalSeconds));
         OnPropertyChanged(nameof(AutoAdvanceAwardIntervalSeconds));
         OnPropertyChanged(nameof(CurrentAutoAdvanceIntervalSeconds));
@@ -353,7 +353,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
                     Trace.WriteLine($"[PresentationStageVM] TeamNoPendingReveal: focusIndex={FocusedRowIndex}");
                     if (HasAwards(teamId))
                     {
-                        if (IsBatchAwardPageEnabled && _medalByTeamId.ContainsKey(teamId) &&
+                        if (IsBatchAwardPageEnabled && _batchTeamIds.Contains(teamId) &&
                             !_currentBatchTeamIds.Contains(teamId))
                             _currentBatchTeamIds.Add(teamId);
 
@@ -413,8 +413,11 @@ public sealed class PresentationStageViewModel : ViewModelBase
     private void InitializeMedalBatchTracking(ContestState contestState)
     {
         _medalByTeamId.Clear();
+        _batchSizeByGroup.Clear();
+        _batchTeamIds.Clear();
         _autoAdvanceBatchEndTeamIds.Clear();
         var presentedTeamIds = PreFreezeRows.Select(row => row.TeamId).ToHashSet(StringComparer.Ordinal);
+
         foreach (var tier in new[] { "gold", "silver", "bronze" })
         {
             var medalId = $"medal-{tier}";
@@ -424,9 +427,32 @@ public sealed class PresentationStageViewModel : ViewModelBase
                 !contestState.Awards.TryGetValue($"{tier}-medal", out award))
                 continue;
 
+            _batchSizeByGroup[medalId] = award.BatchSize;
+
             foreach (var teamId in award.TeamIds)
                 if (presentedTeamIds.Contains(teamId))
                     _medalByTeamId.TryAdd(teamId, medalId);
+        }
+
+        // The top three finishers (champion, runner-up, third place) are presented individually
+        // rather than inside a medal batch.
+        var topThreeTeamIds = contestState.LeaderboardFinalized
+            .Where(team => presentedTeamIds.Contains(team.TeamId))
+            .Take(3)
+            .Select(team => team.TeamId)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var teamId in presentedTeamIds)
+        {
+            if (topThreeTeamIds.Contains(teamId))
+                continue;
+
+            if (!_medalByTeamId.TryGetValue(teamId, out var tier) ||
+                !_batchSizeByGroup.TryGetValue(tier, out var batchSize) ||
+                batchSize <= 0)
+                continue;
+
+            _batchTeamIds.Add(teamId);
         }
 
         if (!IsAutoAdvanceBatchEnabled)
@@ -436,15 +462,31 @@ public sealed class PresentationStageViewModel : ViewModelBase
         // Freeze the batch endpoints in final rank order so resorting and extra awards
         // cannot change the count, and each medal tier starts its own sequence of batches.
         var medalTeamsByTier = contestState.LeaderboardFinalized
-            .Where(team => _medalByTeamId.ContainsKey(team.TeamId))
+            .Where(team => _batchTeamIds.Contains(team.TeamId))
             .Reverse()
             .GroupBy(team => _medalByTeamId[team.TeamId]);
         foreach (var tierTeams in medalTeamsByTier)
         {
             var winners = tierTeams.ToList();
+            var batchSize = _batchSizeByGroup[tierTeams.Key];
             for (var i = 0; i < winners.Count; i++)
-                if ((i + 1) % AutoAdvanceBatchSize == 0 || i == winners.Count - 1)
+                if ((i + 1) % batchSize == 0 || i == winners.Count - 1)
                     _autoAdvanceBatchEndTeamIds.Add(winners[i].TeamId);
+        }
+
+        // Diagnostic: dump batch state so mis-grouping can be inspected in the field.
+        try
+        {
+            var log = new System.Text.StringBuilder();
+            log.AppendLine($"presented={presentedTeamIds.Count} medals={_medalByTeamId.Count} batchTeams={_batchTeamIds.Count} endpoints={_autoAdvanceBatchEndTeamIds.Count}");
+            log.AppendLine($"batchSizes=[{string.Join(", ", _batchSizeByGroup.Select(kv => $"{kv.Key}={kv.Value}"))}]");
+            log.AppendLine($"top3=[{string.Join(", ", topThreeTeamIds)}]");
+            log.AppendLine($"finalizedTop5=[{string.Join(", ", contestState.LeaderboardFinalized.Where(t => presentedTeamIds.Contains(t.TeamId)).Take(5).Select(t => $"{t.TeamId}:{t.TotalPoints}"))}]");
+            System.IO.File.AppendAllText(@"C:\Project\Pyrite\batch-debug.log", log.ToString());
+        }
+        catch
+        {
+            // Never let diagnostics break the presentation.
         }
     }
 

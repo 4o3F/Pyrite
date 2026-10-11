@@ -29,6 +29,10 @@ public sealed class SetMedalStageViewModel : ViewModelBase
     private int _medalGoldCount;
     private string _medalSilverCitation = "Silver Medal";
     private int _medalSilverCount;
+    private int _medalGoldBatchSize;
+    private int _medalSilverBatchSize;
+    private int _medalBronzeBatchSize;
+    private int _manualBatchSize;
     private string _statusMessage = string.Empty;
 
     public SetMedalStageViewModel()
@@ -92,6 +96,24 @@ public sealed class SetMedalStageViewModel : ViewModelBase
         }
     }
 
+    public int MedalGoldBatchSize
+    {
+        get => _medalGoldBatchSize;
+        set => SetProperty(ref _medalGoldBatchSize, Math.Max(0, value));
+    }
+
+    public int MedalSilverBatchSize
+    {
+        get => _medalSilverBatchSize;
+        set => SetProperty(ref _medalSilverBatchSize, Math.Max(0, value));
+    }
+
+    public int MedalBronzeBatchSize
+    {
+        get => _medalBronzeBatchSize;
+        set => SetProperty(ref _medalBronzeBatchSize, Math.Max(0, value));
+    }
+
     public string MedalGoldCitation
     {
         get => _medalGoldCitation;
@@ -126,6 +148,12 @@ public sealed class SetMedalStageViewModel : ViewModelBase
     {
         get => _manualTeamIdsCsv;
         set => SetProperty(ref _manualTeamIdsCsv, value);
+    }
+
+    public int ManualBatchSize
+    {
+        get => _manualBatchSize;
+        set => SetProperty(ref _manualBatchSize, Math.Max(0, value));
     }
 
     public int EligibleTeamCount
@@ -366,11 +394,12 @@ public sealed class SetMedalStageViewModel : ViewModelBase
     {
         if (!TryGetContestState(out var contestState)) return;
 
-        foreach (var (medalId, citation, winners) in BuildStandardMedalSpecifications())
+        foreach (var (medalId, citation, batchSize, winners) in BuildStandardMedalSpecifications())
             contestState.Awards[medalId] = new Award
             {
                 Id = medalId,
                 Citation = citation,
+                BatchSize = batchSize,
                 TeamIds = winners
             };
 
@@ -399,6 +428,7 @@ public sealed class SetMedalStageViewModel : ViewModelBase
         {
             Id = medalId,
             Citation = citation,
+            BatchSize = ManualBatchSize,
             TeamIds = teamIds
         };
 
@@ -431,7 +461,7 @@ public sealed class SetMedalStageViewModel : ViewModelBase
                 ? "None"
                 : string.Join(", ", medal.TeamIds.Take(5)) + (medal.TeamIds.Count > 5 ? " ..." : string.Empty);
 
-            Medals.Add(new MedalSummaryItem(medal.Id, medal.Citation, medal.TeamIds.Count, preview));
+            Medals.Add(new MedalSummaryItem(medal.Id, medal.Citation, medal.TeamIds.Count, medal.BatchSize, preview));
         }
     }
 
@@ -498,19 +528,22 @@ public sealed class SetMedalStageViewModel : ViewModelBase
         return false;
     }
 
-    private IEnumerable<(string MedalId, string Citation, List<string> Winners)> BuildStandardMedalSpecifications()
+    private IEnumerable<(string MedalId, string Citation, int BatchSize, List<string> Winners)> BuildStandardMedalSpecifications()
     {
         yield return (
             "medal-gold",
             MedalGoldCitation.Trim(),
+            MedalGoldBatchSize,
             GoldPreview.Select(x => x.TeamId).ToList());
         yield return (
             "medal-silver",
             MedalSilverCitation.Trim(),
+            MedalSilverBatchSize,
             SilverPreview.Select(x => x.TeamId).ToList());
         yield return (
             "medal-bronze",
             MedalBronzeCitation.Trim(),
+            MedalBronzeBatchSize,
             BronzePreview.Select(x => x.TeamId).ToList());
     }
 }
@@ -553,16 +586,18 @@ public sealed class TeamPreviewItem
 
 public sealed class MedalSummaryItem
 {
-    public MedalSummaryItem(string id, string citation, int teamCount, string teamPreview)
+    public MedalSummaryItem(string id, string citation, int teamCount, int batchSize, string teamPreview)
     {
         Id = id;
         Citation = citation;
         TeamCount = teamCount;
+        BatchSize = batchSize;
         TeamPreview = teamPreview;
     }
 
     public string Id { get; }
     public string Citation { get; }
     public int TeamCount { get; }
+    public int BatchSize { get; }
     public string TeamPreview { get; }
 }

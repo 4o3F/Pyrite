@@ -256,6 +256,12 @@ public sealed class Award : IHasId
     public string Citation { get; set; } = string.Empty;
 
     [JsonPropertyName("team_ids")] public List<string> TeamIds { get; set; } = [];
+
+    /// <summary>
+    /// Number of recipients revealed per batch during presentation. Values &lt;= 0 disable
+    /// grouping, so the award is presented one recipient at a time (e.g. champion, best team).
+    /// </summary>
+    [JsonPropertyName("batch_size")] public int BatchSize { get; set; }
 }
 
 public sealed class Contest

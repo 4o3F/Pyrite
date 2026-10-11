@@ -14,12 +14,10 @@ auto_advance_enabled = false
 auto_advance_interval_seconds = 1.0
 # Time to show each award page after its fade-in, separate from normal resolution steps.
 auto_advance_award_interval_seconds = 5.0
-# Set auto_advance_enabled = true and a positive batch size for click-to-start medal batches.
-# 0 preserves automatic stepping with a pause at every award page.
-auto_advance_batch_size = 12
 # Optional collective award page at each batch boundary; false pauses on the scoreboard.
-# Requires auto_advance_enabled = true and a positive auto_advance_batch_size.
-batch_award_page_enabled = false
+# Requires auto_advance_enabled = true and at least one medal tier with a positive batch size
+# (the batch size is set per award in the GUI or in awards.json as "batch_size").
+batch_award_page_enabled = true
 # Seconds for one complete loop of all names on an overflowing batch award page.
 # Speed is calculated from the rendered list height; the initial 2-second pause is separate.
 batch_name_scroll_cycle_seconds = 30.0
