@@ -72,7 +72,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
     }
     public bool AutoAdvanceEnabled => _loadedConfig.Presentation.AutoAdvanceEnabled;
     private bool IsAutoAdvanceBatchEnabled => AutoAdvanceEnabled && _batchTeamIds.Count > 0;
-    private bool IsBatchAwardPageEnabled => IsAutoAdvanceBatchEnabled && _loadedConfig.Presentation.BatchAwardPageEnabled;
+    private bool IsBatchAwardPageEnabled => IsAutoAdvanceBatchEnabled;
     public bool CanAutoAdvance => IsInitialized && IsStarted && AutoAdvanceEnabled && !IsBatchAwardVisible &&
         (IsAutoAdvanceBatchEnabled ? IsAutoAdvanceBatchActive : State != PresentationRowState.RowCompleteAwardShowing);
     public BatchAwardViewModel? BatchAward
