@@ -23,6 +23,12 @@ public sealed class PresentationStageViewModel : ViewModelBase
     private const int MaxLogoCacheItems = 512;
     private const long MaxLogoCacheApproxBytes = 64L * 1024 * 1024;
 
+    private static readonly HashSet<string> MedalAwardIds = new(StringComparer.Ordinal)
+    {
+        "medal-gold", "medal-silver", "medal-bronze",
+        "gold-medal", "silver-medal", "bronze-medal"
+    };
+
     private ContestState? _contestState;
     private readonly BoundedBitmapCache _logoCache = new(MaxLogoCacheItems, MaxLogoCacheApproxBytes);
     private Bitmap? _awardAffiliationLogoImage;
@@ -40,6 +46,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
     private readonly Dictionary<string, string> _medalByTeamId = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _batchSizeByGroup = new(StringComparer.Ordinal);
     private readonly HashSet<string> _batchTeamIds = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _topThreeRanks = new(StringComparer.Ordinal);
     private readonly HashSet<string> _autoAdvanceBatchEndTeamIds = new(StringComparer.Ordinal);
     private PyriteConfig _loadedConfig = PyriteConfig.Default();
     private readonly Dictionary<string, Queue<string>> _pendingRevealsByTeamId = new(StringComparer.Ordinal);
@@ -359,6 +366,11 @@ public sealed class PresentationStageViewModel : ViewModelBase
 
                         ShowAwardOverlay(teamId);
                         State = PresentationRowState.RowCompleteAwardShowing;
+
+                        // The top three are revealed manually: pause the batch so a click is
+                        // required before advancing to the next team's award page.
+                        if (_topThreeRanks.ContainsKey(teamId))
+                            IsAutoAdvanceBatchActive = false;
                     }
                     else
                     {
@@ -415,6 +427,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
         _medalByTeamId.Clear();
         _batchSizeByGroup.Clear();
         _batchTeamIds.Clear();
+        _topThreeRanks.Clear();
         _autoAdvanceBatchEndTeamIds.Clear();
         var presentedTeamIds = PreFreezeRows.Select(row => row.TeamId).ToHashSet(StringComparer.Ordinal);
 
@@ -436,15 +449,15 @@ public sealed class PresentationStageViewModel : ViewModelBase
 
         // The top three finishers (champion, runner-up, third place) are presented individually
         // rather than inside a medal batch.
-        var topThreeTeamIds = contestState.LeaderboardFinalized
-            .Where(team => presentedTeamIds.Contains(team.TeamId))
-            .Take(3)
-            .Select(team => team.TeamId)
-            .ToHashSet(StringComparer.Ordinal);
+        var rank = 1;
+        foreach (var team in contestState.LeaderboardFinalized
+                     .Where(team => presentedTeamIds.Contains(team.TeamId))
+                     .Take(3))
+            _topThreeRanks[team.TeamId] = rank++;
 
         foreach (var teamId in presentedTeamIds)
         {
-            if (topThreeTeamIds.Contains(teamId))
+            if (_topThreeRanks.ContainsKey(teamId))
                 continue;
 
             if (!_medalByTeamId.TryGetValue(teamId, out var tier) ||
@@ -474,20 +487,9 @@ public sealed class PresentationStageViewModel : ViewModelBase
                     _autoAdvanceBatchEndTeamIds.Add(winners[i].TeamId);
         }
 
-        // Diagnostic: dump batch state so mis-grouping can be inspected in the field.
-        try
-        {
-            var log = new System.Text.StringBuilder();
-            log.AppendLine($"presented={presentedTeamIds.Count} medals={_medalByTeamId.Count} batchTeams={_batchTeamIds.Count} endpoints={_autoAdvanceBatchEndTeamIds.Count}");
-            log.AppendLine($"batchSizes=[{string.Join(", ", _batchSizeByGroup.Select(kv => $"{kv.Key}={kv.Value}"))}]");
-            log.AppendLine($"top3=[{string.Join(", ", topThreeTeamIds)}]");
-            log.AppendLine($"finalizedTop5=[{string.Join(", ", contestState.LeaderboardFinalized.Where(t => presentedTeamIds.Contains(t.TeamId)).Take(5).Select(t => $"{t.TeamId}:{t.TotalPoints}"))}]");
-            System.IO.File.AppendAllText(@"C:\Project\Pyrite\batch-debug.log", log.ToString());
-        }
-        catch
-        {
-            // Never let diagnostics break the presentation.
-        }
+        Trace.WriteLine($"[PresentationStageVM] BatchState: presented={presentedTeamIds.Count} medals={_medalByTeamId.Count} batchTeams={_batchTeamIds.Count} endpoints={_autoAdvanceBatchEndTeamIds.Count}");
+        Trace.WriteLine($"[PresentationStageVM] BatchSizes: {string.Join(", ", _batchSizeByGroup.Select(kv => $"{kv.Key}={kv.Value}"))}");
+        Trace.WriteLine($"[PresentationStageVM] TopThree: {string.Join(", ", _topThreeRanks.Select(kv => $"{kv.Key}:{kv.Value}"))}");
     }
 
     private void PauseAtMedalBatchBoundary(string teamId)
@@ -720,6 +722,12 @@ public sealed class PresentationStageViewModel : ViewModelBase
             return false;
         }
 
+        // The top three finishers always get an award page (champion/runner-up/third place).
+        if (_topThreeRanks.ContainsKey(teamId))
+        {
+            return true;
+        }
+
         foreach (var award in _contestState.Awards.Values)
         {
             if (award.TeamIds.Contains(teamId, StringComparer.Ordinal))
@@ -771,6 +779,38 @@ public sealed class PresentationStageViewModel : ViewModelBase
         if (_contestState is null)
         {
             return string.Empty;
+        }
+
+        // The top three finishers show their finishing title, the gold medal, and any other
+        // non-medal awards they have won.
+        if (_topThreeRanks.TryGetValue(teamId, out var topRank))
+        {
+            var titleLines = new List<string>
+            {
+                topRank switch
+                {
+                    1 => "Champion",
+                    2 => "Runner-up",
+                    _ => "Third place"
+                },
+                "Gold Medal"
+            };
+
+            foreach (var award in _contestState.Awards.Values)
+            {
+                if (MedalAwardIds.Contains(award.Id) ||
+                    !award.TeamIds.Contains(teamId, StringComparer.Ordinal))
+                    continue;
+
+                var label = string.IsNullOrWhiteSpace(award.Citation) ? award.Id : award.Citation;
+                if (!string.IsNullOrWhiteSpace(label))
+                    titleLines.Add(label);
+            }
+
+            var titleBuilder = new StringBuilder();
+            foreach (var line in titleLines.Distinct(StringComparer.Ordinal))
+                titleBuilder.AppendLine(line);
+            return titleBuilder.ToString().TrimEnd();
         }
 
         var lines = new List<string>();

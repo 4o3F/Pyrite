@@ -51,7 +51,7 @@ The batch size is set per award, not globally: set a positive batch size on the 
 
 The presentation waits for a click or `Space` before each batch. It then resolves submissions, updates rankings, and shows each team's award page automatically. Only teams receiving a bronze, silver, or gold medal whose award has a positive batch size count toward the batch size; extra awards for the same team do not add to the count. Both the GUI's IDs (`medal-bronze`, `medal-silver`, `medal-gold`) and DOMjudge's IDs (`bronze-medal`, `silver-medal`, `gold-medal`) are recognized. GUI medal assignments take precedence for each tier when both forms exist. Teams without pending submissions still receive their awards.
 
-The top three finishers (champion, runner-up, and third place) are always presented one recipient at a time, outside of any medal batch.
+The top three finishers are the champion, runner-up, and third place. They are gold medalists (the gold count includes them), but they are shown separately — one recipient at a time, outside of the gold batches. Each page lists their finishing title (`Champion` / `Runner-up` / `Third place`), `Gold Medal`, and any other non-medal awards they won. Each of these award pages advances manually: a click is required to leave one award page and move to the next.
 
 With `skip_no_medal = true`, ranks below the last medal recipient in the final standings are resolved silently before the presentation starts. The scoreboard keeps all teams, with focus starting at the last medal rank. Without this setting, resolution starts at the lowest row with pending submissions or an award.
 
