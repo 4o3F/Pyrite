@@ -6,3 +6,5 @@ obj
 .dotnet
 out
 Native
+.ccg
+.claude
