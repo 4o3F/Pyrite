@@ -28,8 +28,6 @@ public sealed class PresentationConfig
     public bool AutoAdvanceEnabled { get; set; }
     public float AutoAdvanceIntervalSeconds { get; set; } = 1.0f;
     public float AutoAdvanceAwardIntervalSeconds { get; set; } = 5.0f;
-    public int AutoAdvanceBatchSize { get; set; }
-    public bool BatchAwardPageEnabled { get; set; }
     public float BatchNameScrollCycleSeconds { get; set; } = 30.0f;
 
     public static PresentationConfig FromToml(TomlTable table)
@@ -71,12 +69,6 @@ public sealed class PresentationConfig
             config.AutoAdvanceAwardIntervalSeconds = NormalizeDuration(
                 ConvertToFloat(awardInterval, config.AutoAdvanceAwardIntervalSeconds),
                 config.AutoAdvanceAwardIntervalSeconds);
-
-        if (table.TryGetValue("auto_advance_batch_size", out var autoAdvanceBatchSize) && autoAdvanceBatchSize is long batchSize)
-            config.AutoAdvanceBatchSize = (int)Math.Clamp(batchSize, 0L, int.MaxValue);
-
-        if (table.TryGetValue("batch_award_page_enabled", out var batchAwardPageEnabled) && batchAwardPageEnabled is bool pageEnabled)
-            config.BatchAwardPageEnabled = pageEnabled;
 
         if (table.TryGetValue("batch_name_scroll_cycle_seconds", out var nameScrollCycle))
             config.BatchNameScrollCycleSeconds = NormalizeDuration(

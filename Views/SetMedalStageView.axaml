@@ -43,7 +43,7 @@
                         <StackPanel Spacing="6">
                             <TextBlock Text="Medal setup and preview" FontWeight="SemiBold" />
 
-                            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8"
+                            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8"
                                   RowSpacing="6">
                                 <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="Gold count" />
                                 <NumericUpDown Grid.Row="0" Grid.Column="1" Minimum="0" Maximum="1000000"
@@ -56,7 +56,21 @@
                                            Text="Bronze count" />
                                 <NumericUpDown Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="1000000"
                                                Value="{Binding MedalBronzeCount}" />
+                                <TextBlock Grid.Row="3" Grid.Column="0" VerticalAlignment="Center"
+                                           Text="Gold batch size" />
+                                <NumericUpDown Grid.Row="3" Grid.Column="1" Minimum="0" Maximum="1000000"
+                                               Value="{Binding MedalGoldBatchSize}" />
+                                <TextBlock Grid.Row="4" Grid.Column="0" VerticalAlignment="Center"
+                                           Text="Silver batch size" />
+                                <NumericUpDown Grid.Row="4" Grid.Column="1" Minimum="0" Maximum="1000000"
+                                               Value="{Binding MedalSilverBatchSize}" />
+                                <TextBlock Grid.Row="5" Grid.Column="0" VerticalAlignment="Center"
+                                           Text="Bronze batch size" />
+                                <NumericUpDown Grid.Row="5" Grid.Column="1" Minimum="0" Maximum="1000000"
+                                               Value="{Binding MedalBronzeBatchSize}" />
                             </Grid>
+                            <TextBlock Text="Batch size 0 disables grouping; a positive value reveals that many winners per batch."
+                                       Foreground="#9AA0A6" FontSize="12" TextWrapping="Wrap" />
 
                             <TextBlock Text="Gold citation" />
                             <TextBox Text="{Binding MedalGoldCitation}" />
@@ -139,6 +153,8 @@
                                                             Text="{Binding Citation, StringFormat=Citation: {0}}" />
                                                         <TextBlock Text="{Binding TeamCount, StringFormat=Teams: {0}}" />
                                                         <TextBlock
+                                                            Text="{Binding BatchSize, StringFormat=Batch size: {0}}" />
+                                                        <TextBlock
                                                             Text="{Binding TeamPreview, StringFormat=Team IDs: {0}}" />
                                                         <Button Content="Delete" Tag="{Binding Id}"
                                                                 Click="OnDeleteMedalClick" />
@@ -162,6 +178,8 @@
                         <TextBox Text="{Binding ManualCitation}" />
                         <TextBlock Text="Team IDs (comma separated)" />
                         <TextBox Text="{Binding ManualTeamIdsCsv}" />
+                        <TextBlock Text="Batch size (0 = no grouping)" />
+                        <NumericUpDown Minimum="0" Maximum="1000000" Value="{Binding ManualBatchSize}" />
                         <Button Content="Add/Update Medal" Command="{Binding AddOrUpdateMedalCommand}"
                                 IsEnabled="{Binding HasContestState}" />
                     </StackPanel>
