@@ -789,9 +789,10 @@ public sealed class PresentationStageViewModel : ViewModelBase
             {
                 topRank switch
                 {
-                    1 => "Champion",
-                    2 => "Runner-up",
-                    _ => "Third place"
+                    1 => "Contest 1",
+                    2 => "Contest 2",
+                    3 => "Contest 3",
+                    _ => throw new ArgumentOutOfRangeException(nameof(topRank), topRank, "topRank 必须是 1、2 或 3")
                 },
                 "Gold Medal"
             };
