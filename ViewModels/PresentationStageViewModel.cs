@@ -523,7 +523,8 @@ public sealed class PresentationStageViewModel : ViewModelBase
         }
 
         if (teams.Count > 0)
-            BatchAward = new BatchAwardViewModel(teams, _loadedConfig.Presentation.BatchNameScrollCycleSeconds);
+            BatchAward = new BatchAwardViewModel(teams, _loadedConfig.Presentation.BatchNameScrollCycleSeconds,
+                _loadedConfig.Presentation.BatchNameWidthRatio);
     }
 
     private void ClearBatchAward()

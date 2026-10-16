@@ -30,6 +30,7 @@ public sealed class PresentationConfig
     public float AutoAdvanceIntervalSeconds { get; set; } = 1.0f;
     public float AutoAdvanceAwardIntervalSeconds { get; set; } = 5.0f;
     public float BatchNameScrollCycleSeconds { get; set; } = 30.0f;
+    public float BatchNameWidthRatio { get; set; } = 0.5f;
 
     public static PresentationConfig FromToml(TomlTable table)
     {
@@ -78,6 +79,19 @@ public sealed class PresentationConfig
             config.BatchNameScrollCycleSeconds = NormalizeDuration(
                 ConvertToFloat(nameScrollCycle, config.BatchNameScrollCycleSeconds),
                 config.BatchNameScrollCycleSeconds);
+
+        if (table.TryGetValue("batch_name_width_ratio", out var nameWidthRatio))
+        {
+            var ratio = nameWidthRatio switch
+            {
+                double d => d,
+                long l => l,
+                _ => config.BatchNameWidthRatio
+            };
+            config.BatchNameWidthRatio = double.IsFinite(ratio)
+                ? (float)Math.Clamp(ratio, 0.1, 0.9)
+                : config.BatchNameWidthRatio;
+        }
 
         return config;
     }

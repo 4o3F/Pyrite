@@ -20,3 +20,6 @@ auto_advance_award_interval_seconds = 5.0
 # Seconds for one complete loop of all names on an overflowing batch award page.
 # Speed is calculated from the rendered list height; the initial 2-second pause is separate.
 batch_name_scroll_cycle_seconds = 30.0
+# Fraction of column space for names, after outer margins and column gaps (0.1-0.9).
+# The left and right image columns each receive half of the remaining space.
+batch_name_width_ratio = 0.5

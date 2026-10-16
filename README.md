@@ -46,6 +46,7 @@ auto_advance_enabled = false
 auto_advance_interval_seconds = 1.0
 auto_advance_award_interval_seconds = 5.0
 batch_name_scroll_cycle_seconds = 30.0
+batch_name_width_ratio = 0.5
 ```
 
 The batch size is set per award, not globally: set a positive batch size on the gold, silver, and bronze medals in the "Set Medal" stage (or in `awards.json` as each award's `batch_size` field). An award with no batch size (or `0`) is shown one recipient at a time instead of being grouped.
@@ -65,6 +66,8 @@ The collective award page shows the actual recipients of that batch in reveal or
 Setting `batch_award_enabled = false` disables collective award pages and batch-based automatic execution, even if medals have positive batch sizes. With this setting disabled, or if no eligible medal recipient has a positive batch size, automatic resolution pauses at every individual award page as before. Setting `auto_advance_enabled = false` keeps manual stepping without disabling collective award pages. Existing configurations that used automatic batches must explicitly add `batch_award_enabled = true` to retain that behavior.
 
 `batch_name_scroll_cycle_seconds` sets the time for one complete loop of all names on the collective award page (default: 30 seconds, range: 0.1–3600 seconds). The scroll speed is the measured height of one complete name list divided by this duration, including wrapped lines, dividers and spacing. The initial two-second pause is separate. A larger value scrolls more slowly; lists that fit stay still.
+
+`batch_name_width_ratio` controls the collective award page's middle name column (default: `0.5`, range: `0.1`–`0.9`). After subtracting the outer margins and the two column gaps, the middle column receives this fraction of the available width; the left and right image columns each receive half of the remainder. For example, `0.6` gives 60% to the middle and 20% to each side. The middle column's padding and borders are included in that fraction, so the text itself has slightly less space. Side cards use the full allocated column width and scale down to fit narrow columns without spilling into the names. Names still wrap at the available text width. The canvas width follows the viewport's aspect ratio so taller batches do not leave large empty bands on either side; images and text retain uniform scaling. Nonfinite or nonnumeric values use the default; numeric values outside the range are clamped.
 
 Animation speed is configured in the `config.toml` file and cannot be changed during the presentation. Be sure to test everything beforehand.
 

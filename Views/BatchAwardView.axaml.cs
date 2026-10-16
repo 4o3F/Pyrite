@@ -26,11 +26,37 @@ public partial class BatchAwardView : UserControl
             Interval = TimeSpan.FromMilliseconds(16)
         };
         _nameScrollTimer.Tick += OnNameScrollTick;
-        DataContextChanged += (_, _) => ResetNameScrolling();
+        DataContextChanged += (_, _) =>
+        {
+            UpdateCanvasWidth();
+            UpdateColumnWidths();
+            ResetNameScrolling();
+        };
+        SizeChanged += (_, _) => UpdateCanvasWidth();
         // Check measured text after layout, including font fallback, wrapping and batch changes.
         LayoutUpdated += (_, _) => UpdateNameScrolling();
         AttachedToVisualTree += OnAttachedToVisualTree;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
+    }
+
+    private void UpdateCanvasWidth()
+    {
+        if (Bounds.Width <= 0 || Bounds.Height <= 0)
+            return;
+
+        // Match the window's aspect ratio so fitting the canvas height never leaves
+        // horizontal letterboxing, including when larger batches make the canvas taller.
+        var canvasHeight = (DataContext as BatchAwardViewModel)?.CanvasHeight ?? 1080;
+        PageCanvas.Width = canvasHeight * Bounds.Width / Bounds.Height;
+    }
+
+    private void UpdateColumnWidths()
+    {
+        var nameRatio = (DataContext as BatchAwardViewModel)?.NameWidthRatio ?? 0.5;
+        var sideRatio = (1 - nameRatio) / 2;
+        ContentColumns.ColumnDefinitions[0].Width = new GridLength(sideRatio, GridUnitType.Star);
+        ContentColumns.ColumnDefinitions[1].Width = new GridLength(nameRatio, GridUnitType.Star);
+        ContentColumns.ColumnDefinitions[2].Width = new GridLength(sideRatio, GridUnitType.Star);
     }
 
     private void OnAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
