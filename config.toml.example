@@ -19,6 +19,7 @@ auto_advance_enabled = false
 # Independent of auto_advance_enabled; each medal's batch_size sets the group size.
 batch_award_enabled = false
 # Seconds per logical step (not per team), also used by the below-medal-boundary lead-in.
+# Ordinary steps do not wait for scrolling or row-movement animations to finish.
 auto_advance_interval_seconds = 1.0
 # Time to show each award page after its fade-in, separate from normal resolution steps.
 auto_advance_award_interval_seconds = 5.0

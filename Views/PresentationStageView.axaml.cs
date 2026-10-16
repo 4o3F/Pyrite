@@ -433,10 +433,8 @@ public partial class PresentationStageView : UserControl
             return;
         }
 
-        if (_scrollAnimationTimer?.IsEnabled == true ||
-            _moveUpAnimationTimer?.IsEnabled == true)
-            return;
-
+        // Like repeated manual steps, ordinary automatic steps do not wait for
+        // scrolling or row movement. Those animations retain their own durations.
         if (vm.HandleAutoStepRequested())
         {
             ResetAutoAdvanceTimer();
