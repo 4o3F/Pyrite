@@ -158,7 +158,7 @@
 						 HorizontalAlignment="Stretch"
 						 VerticalAlignment="Stretch">
 					<Grid Width="1600"
-						  Height="240"
+						  MinHeight="240"
 						  ColumnDefinitions="240,*"
 						  ColumnSpacing="32">
 						<Border Grid.Column="0"
