@@ -74,7 +74,7 @@ public partial class PresentationStageView : UserControl
             return;
         }
 
-        if (e.Key != Key.Space)
+        if (e.Key is not (Key.Space or Key.PageDown))
         {
             return;
         }
