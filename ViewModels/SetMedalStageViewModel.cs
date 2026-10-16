@@ -230,6 +230,7 @@ public sealed class SetMedalStageViewModel : ViewModelBase
 
         contestState.Awards = normalized;
         RefreshMedals();
+        SyncMedalEditorFromAwards();
         StatusMessage = $"Loaded {contestState.Awards.Count} medal(s) from {path}";
     }
 
@@ -462,6 +463,53 @@ public sealed class SetMedalStageViewModel : ViewModelBase
                 : string.Join(", ", medal.TeamIds.Take(5)) + (medal.TeamIds.Count > 5 ? " ..." : string.Empty);
 
             Medals.Add(new MedalSummaryItem(medal.Id, medal.Citation, medal.TeamIds.Count, medal.BatchSize, preview));
+        }
+    }
+
+    private void SyncMedalEditorFromAwards()
+    {
+        var gold = FindStandardMedal("gold");
+        var silver = FindStandardMedal("silver");
+        var bronze = FindStandardMedal("bronze");
+
+        // Set all counts before recomputing the preview and its derived properties.
+        SetProperty(ref _medalGoldCount, gold?.TeamIds.Count ?? 0, nameof(MedalGoldCount));
+        SetProperty(ref _medalSilverCount, silver?.TeamIds.Count ?? 0, nameof(MedalSilverCount));
+        SetProperty(ref _medalBronzeCount, bronze?.TeamIds.Count ?? 0, nameof(MedalBronzeCount));
+        MedalGoldBatchSize = gold?.BatchSize ?? 0;
+        MedalSilverBatchSize = silver?.BatchSize ?? 0;
+        MedalBronzeBatchSize = bronze?.BatchSize ?? 0;
+        MedalGoldCitation = gold?.Citation ?? "Gold Medal";
+        MedalSilverCitation = silver?.Citation ?? "Silver Medal";
+        MedalBronzeCitation = bronze?.Citation ?? "Bronze Medal";
+        RecomputeMedalPreview();
+
+        // Imported recipients need not be contiguous in rank order. Preserve the file's
+        // actual assignments until the user changes counts or category selections.
+        ReplacePreviewCollection(GoldPreview, BuildLoadedMedalPreview(gold));
+        ReplacePreviewCollection(SilverPreview, BuildLoadedMedalPreview(silver));
+        ReplacePreviewCollection(BronzePreview, BuildLoadedMedalPreview(bronze));
+    }
+
+    private Award? FindStandardMedal(string tier)
+    {
+        if (_contestState is null) return null;
+
+        // Match presentation's precedence when both GUI and DOMjudge IDs exist.
+        return _contestState.Awards.TryGetValue($"medal-{tier}", out var medal) ||
+               _contestState.Awards.TryGetValue($"{tier}-medal", out medal)
+            ? medal
+            : null;
+    }
+
+    private IEnumerable<TeamPreviewItem> BuildLoadedMedalPreview(Award? medal)
+    {
+        if (medal is null || _contestState is null) yield break;
+
+        foreach (var teamId in medal.TeamIds)
+        {
+            var name = _contestState.Teams.TryGetValue(teamId, out var team) ? team.Name : teamId;
+            yield return new TeamPreviewItem(teamId, name);
         }
     }
 
