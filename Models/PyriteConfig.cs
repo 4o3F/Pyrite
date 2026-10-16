@@ -26,6 +26,7 @@ public sealed class PresentationConfig
     public string? TeamPhotoFallbackPath { get; set; }
     public bool SkipNoMedal { get; set; }
     public bool AutoAdvanceEnabled { get; set; }
+    public bool BatchAwardEnabled { get; set; }
     public float AutoAdvanceIntervalSeconds { get; set; } = 1.0f;
     public float AutoAdvanceAwardIntervalSeconds { get; set; } = 5.0f;
     public float BatchNameScrollCycleSeconds { get; set; } = 30.0f;
@@ -59,6 +60,9 @@ public sealed class PresentationConfig
 
         if (table.TryGetValue("auto_advance_enabled", out var autoAdvanceEnabled) && autoAdvanceEnabled is bool enabled)
             config.AutoAdvanceEnabled = enabled;
+
+        if (table.TryGetValue("batch_award_enabled", out var batchAwardEnabled) && batchAwardEnabled is bool batchEnabled)
+            config.BatchAwardEnabled = batchEnabled;
 
         if (table.TryGetValue("auto_advance_interval_seconds", out var autoAdvanceInterval))
             config.AutoAdvanceIntervalSeconds = NormalizeDuration(

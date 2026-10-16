@@ -47,7 +47,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
     private readonly Dictionary<string, int> _batchSizeByGroup = new(StringComparer.Ordinal);
     private readonly HashSet<string> _batchTeamIds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _topThreeRanks = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _autoAdvanceBatchEndTeamIds = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _medalBatchEndTeamIds = new(StringComparer.Ordinal);
     private PyriteConfig _loadedConfig = PyriteConfig.Default();
     private readonly Dictionary<string, Queue<string>> _pendingRevealsByTeamId = new(StringComparer.Ordinal);
     private readonly List<ProblemDisplayInfo> _orderedProblems = [];
@@ -78,8 +78,8 @@ public sealed class PresentationStageViewModel : ViewModelBase
         private set => SetProperty(ref _moveUpAnimationRequest, value);
     }
     public bool AutoAdvanceEnabled => _loadedConfig.Presentation.AutoAdvanceEnabled;
-    private bool IsAutoAdvanceBatchEnabled => AutoAdvanceEnabled && _batchTeamIds.Count > 0;
-    private bool IsBatchAwardPageEnabled => IsAutoAdvanceBatchEnabled;
+    private bool IsBatchAwardPageEnabled => _loadedConfig.Presentation.BatchAwardEnabled && _batchTeamIds.Count > 0;
+    private bool IsAutoAdvanceBatchEnabled => AutoAdvanceEnabled && IsBatchAwardPageEnabled;
     public bool CanAutoAdvance => IsInitialized && IsStarted && AutoAdvanceEnabled && !IsBatchAwardVisible &&
         (IsAutoAdvanceBatchEnabled ? IsAutoAdvanceBatchActive : State != PresentationRowState.RowCompleteAwardShowing);
     public BatchAwardViewModel? BatchAward
@@ -287,6 +287,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
         if (IsBatchAwardVisible)
         {
             ClearBatchAward();
+            _currentBatchTeamIds.Clear();
             // The final batch returns to the completed scoreboard without starting another batch.
             if (FocusedRowIndex == 0)
                 return true;
@@ -299,7 +300,6 @@ public sealed class PresentationStageViewModel : ViewModelBase
                 (State == PresentationRowState.RowCompleteReadyToAdvance && FocusedRowIndex == 0))
                 return false;
 
-            _currentBatchTeamIds.Clear();
             IsAutoAdvanceBatchActive = true;
         }
 
@@ -428,7 +428,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
         _batchSizeByGroup.Clear();
         _batchTeamIds.Clear();
         _topThreeRanks.Clear();
-        _autoAdvanceBatchEndTeamIds.Clear();
+        _medalBatchEndTeamIds.Clear();
         var presentedTeamIds = PreFreezeRows.Select(row => row.TeamId).ToHashSet(StringComparer.Ordinal);
 
         foreach (var tier in new[] { "gold", "silver", "bronze" })
@@ -468,7 +468,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
             _batchTeamIds.Add(teamId);
         }
 
-        if (!IsAutoAdvanceBatchEnabled)
+        if (!IsBatchAwardPageEnabled)
             return;
 
         // ContestState.Awards is the current selection, including any reloaded awards.json.
@@ -484,18 +484,18 @@ public sealed class PresentationStageViewModel : ViewModelBase
             var batchSize = _batchSizeByGroup[tierTeams.Key];
             for (var i = 0; i < winners.Count; i++)
                 if ((i + 1) % batchSize == 0 || i == winners.Count - 1)
-                    _autoAdvanceBatchEndTeamIds.Add(winners[i].TeamId);
+                    _medalBatchEndTeamIds.Add(winners[i].TeamId);
         }
 
-        Trace.WriteLine($"[PresentationStageVM] BatchState: presented={presentedTeamIds.Count} medals={_medalByTeamId.Count} batchTeams={_batchTeamIds.Count} endpoints={_autoAdvanceBatchEndTeamIds.Count}");
+        Trace.WriteLine($"[PresentationStageVM] BatchState: presented={presentedTeamIds.Count} medals={_medalByTeamId.Count} batchTeams={_batchTeamIds.Count} endpoints={_medalBatchEndTeamIds.Count}");
         Trace.WriteLine($"[PresentationStageVM] BatchSizes: {string.Join(", ", _batchSizeByGroup.Select(kv => $"{kv.Key}={kv.Value}"))}");
         Trace.WriteLine($"[PresentationStageVM] TopThree: {string.Join(", ", _topThreeRanks.Select(kv => $"{kv.Key}:{kv.Value}"))}");
     }
 
     private void PauseAtMedalBatchBoundary(string teamId)
     {
-        if (IsAutoAdvanceBatchEnabled &&
-            (_autoAdvanceBatchEndTeamIds.Contains(teamId) || FocusedRowIndex == 0))
+        if (IsBatchAwardPageEnabled &&
+            (_medalBatchEndTeamIds.Contains(teamId) || FocusedRowIndex == 0))
         {
             IsAutoAdvanceBatchActive = false;
             ShowBatchAward();
