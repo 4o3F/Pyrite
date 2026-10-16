@@ -26,6 +26,12 @@
 					 BorderThickness="0"
 					 SelectedIndex="{Binding FocusedRowIndex, Mode=OneWay}"
 					 ItemsSource="{Binding PreFreezeRows}">
+				<ListBox.ItemsPanel>
+					<ItemsPanelTemplate>
+						<!-- A nonzero cache realizes several rows at once at each cache boundary. -->
+						<VirtualizingStackPanel CacheLength="0" />
+					</ItemsPanelTemplate>
+				</ListBox.ItemsPanel>
 				<ListBox.Styles>
 					<Style Selector="ListBox.scoreboard ListBoxItem">
 						<Setter Property="Padding" Value="0,5"/>
@@ -41,6 +47,25 @@
 						<Setter Property="Background" Value="#A7D8FF"/>
 					</Style>
 				</ListBox.Styles>
+				<ListBox.ItemContainerTheme>
+					<ControlTheme TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+						<Setter Property="Template">
+							<ControlTemplate>
+								<!-- Keep Fluent's named presenter and all its original template bindings. -->
+								<views:RecyclingContentPresenter Name="PART_ContentPresenter"
+									Background="{TemplateBinding Background}"
+									BorderBrush="{TemplateBinding BorderBrush}"
+									BorderThickness="{TemplateBinding BorderThickness}"
+									CornerRadius="{TemplateBinding CornerRadius}"
+									ItemTemplate="{TemplateBinding ContentTemplate}"
+									Item="{TemplateBinding Content}"
+									Padding="{TemplateBinding Padding}"
+									VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+									HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}" />
+							</ControlTemplate>
+						</Setter>
+					</ControlTheme>
+				</ListBox.ItemContainerTheme>
 				<ListBox.ItemTemplate>
 					<DataTemplate x:DataType="vm:PreFreezeScoreboardRowViewModel">
 						<Grid ColumnDefinitions="70,110,*,120,140" >
@@ -73,14 +98,8 @@
 										   FontWeight="Bold"
 										   Foreground="White"
 										   TextTrimming="CharacterEllipsis" />
-								<ItemsControl ItemsSource="{Binding ProblemCells}">
-									<ItemsControl.ItemsPanel>
-										<ItemsPanelTemplate>
-											<UniformGrid Rows="1"
-														 Columns="{Binding ProblemCellCount}" />
-										</ItemsPanelTemplate>
-									</ItemsControl.ItemsPanel>
-									<ItemsControl.ItemTemplate>
+								<views:ProblemCellsView Cells="{Binding ProblemCells}" Rows="1" Columns="{Binding ProblemCellCount}">
+									<views:ProblemCellsView.CellTemplate>
 										<DataTemplate x:DataType="vm:ProblemStatusCellViewModel">
 											<Border Background="{Binding Background}"
 													CornerRadius="4"
@@ -94,8 +113,8 @@
 														   VerticalAlignment="Center" />
 											</Border>
 										</DataTemplate>
-									</ItemsControl.ItemTemplate>
-								</ItemsControl>
+									</views:ProblemCellsView.CellTemplate>
+								</views:ProblemCellsView>
 							</StackPanel>
 							<TextBlock Grid.Column="3"
 									   Text="{Binding TotalPoints}"
