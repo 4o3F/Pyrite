@@ -41,6 +41,8 @@ public sealed class PresentationStageViewModel : ViewModelBase
     private bool _isInitialized;
     private bool _isStarted;
     private bool _isAutoAdvanceBatchActive;
+    private PresentationStartupPhase _startupPhase;
+    private int _lastMedalRowIndex = -1;
     private BatchAwardViewModel? _batchAward;
     private readonly List<string> _currentBatchTeamIds = [];
     private readonly Dictionary<string, string> _medalByTeamId = new(StringComparer.Ordinal);
@@ -80,8 +82,27 @@ public sealed class PresentationStageViewModel : ViewModelBase
     public bool AutoAdvanceEnabled => _loadedConfig.Presentation.AutoAdvanceEnabled;
     private bool IsBatchAwardPageEnabled => _loadedConfig.Presentation.BatchAwardEnabled && _batchTeamIds.Count > 0;
     private bool IsAutoAdvanceBatchEnabled => AutoAdvanceEnabled && IsBatchAwardPageEnabled;
-    public bool CanAutoAdvance => IsInitialized && IsStarted && AutoAdvanceEnabled && !IsBatchAwardVisible &&
-        (IsAutoAdvanceBatchEnabled ? IsAutoAdvanceBatchActive : State != PresentationRowState.RowCompleteAwardShowing);
+    public PresentationStartupPhase StartupPhase
+    {
+        get => _startupPhase;
+        private set
+        {
+            if (SetProperty(ref _startupPhase, value))
+            {
+                RevealCommand.NotifyCanExecuteChanged();
+                MoveUpCommand.NotifyCanExecuteChanged();
+                RefreshSessionStatus();
+            }
+        }
+    }
+    public double IntroScrollSeconds => float.IsFinite(_loadedConfig.Presentation.IntroScrollSeconds)
+        ? Math.Clamp(_loadedConfig.Presentation.IntroScrollSeconds, 0.1, 3600)
+        : 8;
+    public bool CanAutoAdvance => IsInitialized && IsStarted && FocusedRowIndex >= 0 && !IsBatchAwardVisible &&
+        (StartupPhase == PresentationStartupPhase.ResolvingBelowMedalBoundary ||
+         (StartupPhase == PresentationStartupPhase.Normal && AutoAdvanceEnabled &&
+          !(FocusedRowIndex == 0 && State == PresentationRowState.RowCompleteReadyToAdvance) &&
+          (IsAutoAdvanceBatchEnabled ? IsAutoAdvanceBatchActive : State != PresentationRowState.RowCompleteAwardShowing)));
     public BatchAwardViewModel? BatchAward
     {
         get => _batchAward;
@@ -197,7 +218,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
     }
 
     public string SessionStatus =>
-        $"Initialized={IsInitialized}, Started={IsStarted}, State={State}, FocusIndex={FocusedRowIndex}, " +
+        $"Initialized={IsInitialized}, Started={IsStarted}, Startup={StartupPhase}, State={State}, FocusIndex={FocusedRowIndex}, " +
         $"Viewport={_viewportWidth:F0}x{_viewportHeight:F0}";
 
     public void Initialize(ContestState contestState, PyriteConfig config, string? dataPath)
@@ -209,6 +230,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
         _contestState = contestState;
         _loadedConfig = config;
         OnPropertyChanged(nameof(AutoAdvanceEnabled));
+        OnPropertyChanged(nameof(IntroScrollSeconds));
         OnPropertyChanged(nameof(AutoAdvanceIntervalSeconds));
         OnPropertyChanged(nameof(AutoAdvanceAwardIntervalSeconds));
         OnPropertyChanged(nameof(CurrentAutoAdvanceIntervalSeconds));
@@ -219,13 +241,17 @@ public sealed class PresentationStageViewModel : ViewModelBase
         _dataPath = dataPath;
         InitializePresentationRows(contestState);
         InitializeMedalBatchTracking(contestState);
+        var presentedTeamIds = PreFreezeRows.Select(row => row.TeamId).ToHashSet(StringComparer.Ordinal);
+        _lastMedalRowIndex = contestState.LeaderboardFinalized
+            .Where(team => presentedTeamIds.Contains(team.TeamId))
+            .ToList()
+            .FindLastIndex(team => _medalByTeamId.ContainsKey(team.TeamId));
         _pendingResortSolvedTeamId = null;
         MoveUpAnimationRequest = null;
-        if (_loadedConfig.Presentation.SkipNoMedal)
-            SkipRowsBelowMedals(contestState);
-        else
-            FocusedRowIndex = FindInitialFocusedRowIndex();
+        // Leave the frozen rows untouched and unselected until the opening browse finishes.
+        FocusedRowIndex = -1;
         State = PresentationRowState.RowInProgress;
+        StartupPhase = PresentationStartupPhase.BrowsingFrozenScoreboard;
         IsInitialized = true;
         RevealCommand.NotifyCanExecuteChanged();
         MoveUpCommand.NotifyCanExecuteChanged();
@@ -239,16 +265,34 @@ public sealed class PresentationStageViewModel : ViewModelBase
             return;
         }
 
+        if (IsStarted)
+            return;
+
         IsStarted = true;
         RevealCommand.NotifyCanExecuteChanged();
         MoveUpCommand.NotifyCanExecuteChanged();
         RefreshSessionStatus();
     }
 
+    public void CompleteIntroScroll()
+    {
+        if (!IsInitialized || !IsStarted || StartupPhase != PresentationStartupPhase.BrowsingFrozenScoreboard)
+            return;
+
+        FocusedRowIndex = _loadedConfig.Presentation.SkipNoMedal
+            ? (_lastMedalRowIndex >= 0 ? PreFreezeRows.Count - 1 : -1)
+            : FindInitialFocusedRowIndex();
+        StartupPhase = _loadedConfig.Presentation.SkipNoMedal && FocusedRowIndex >= 0
+            ? PresentationStartupPhase.ResolvingBelowMedalBoundary
+            : PresentationStartupPhase.Normal;
+        PauseAtMedalBoundary();
+    }
+
     public void Stop()
     {
         IsAutoAdvanceBatchActive = false;
         IsStarted = false;
+        StartupPhase = PresentationStartupPhase.Inactive;
         ClearBatchAward();
         _currentBatchTeamIds.Clear();
         RevealCommand.NotifyCanExecuteChanged();
@@ -281,8 +325,13 @@ public sealed class PresentationStageViewModel : ViewModelBase
 
     public bool HandleManualStepRequested()
     {
-        if (!IsInitialized || !IsStarted)
+        if (!IsInitialized || !IsStarted ||
+            StartupPhase is PresentationStartupPhase.Inactive or
+                PresentationStartupPhase.BrowsingFrozenScoreboard or PresentationStartupPhase.ResolvingBelowMedalBoundary)
             return false;
+
+        if (StartupPhase == PresentationStartupPhase.AwaitingMedalBoundary)
+            StartupPhase = PresentationStartupPhase.Normal;
 
         if (IsBatchAwardVisible)
         {
@@ -311,15 +360,38 @@ public sealed class PresentationStageViewModel : ViewModelBase
 
     public bool HandleAutoStepRequested()
     {
+        PauseAtMedalBoundary();
         if (!CanAutoAdvance)
         {
             return false;
         }
 
+        var resolvingBelowBoundary = StartupPhase == PresentationStartupPhase.ResolvingBelowMedalBoundary;
         var advanced = TryAdvanceStep(autoTriggered: true);
+        if (resolvingBelowBoundary)
+        {
+            if (!advanced)
+            {
+                // No remaining steps: leave the completed scoreboard visible.
+                State = PresentationRowState.RowCompleteReadyToAdvance;
+                StartupPhase = PresentationStartupPhase.Normal;
+            }
+            else
+                PauseAtMedalBoundary();
+        }
         if (!advanced)
             IsAutoAdvanceBatchActive = false;
         return advanced;
+    }
+
+    private void PauseAtMedalBoundary()
+    {
+        // This is a final-rank boundary, not an award-bearing team identity. A medal
+        // candidate still below this row must be revealed and allowed to move upward.
+        if (StartupPhase == PresentationStartupPhase.ResolvingBelowMedalBoundary &&
+            State == PresentationRowState.RowInProgress &&
+            FocusedRowIndex >= 0 && FocusedRowIndex <= _lastMedalRowIndex)
+            StartupPhase = PresentationStartupPhase.AwaitingMedalBoundary;
     }
 
     private bool TryAdvanceStep(bool autoTriggered)
@@ -358,7 +430,7 @@ public sealed class PresentationStageViewModel : ViewModelBase
                 else
                 {
                     Trace.WriteLine($"[PresentationStageVM] TeamNoPendingReveal: focusIndex={FocusedRowIndex}");
-                    if (HasAwards(teamId))
+                    if (StartupPhase != PresentationStartupPhase.ResolvingBelowMedalBoundary && HasAwards(teamId))
                     {
                         if (IsBatchAwardPageEnabled && _batchTeamIds.Contains(teamId) &&
                             !_currentBatchTeamIds.Contains(teamId))
@@ -582,33 +654,6 @@ public sealed class PresentationStageViewModel : ViewModelBase
         return -1;
     }
 
-    private void SkipRowsBelowMedals(ContestState contestState)
-    {
-        var presentedTeamIds = PreFreezeRows.Select(row => row.TeamId).ToHashSet(StringComparer.Ordinal);
-        var finalized = contestState.LeaderboardFinalized
-            .Where(team => presentedTeamIds.Contains(team.TeamId))
-            .ToList();
-        var lastMedalIndex = finalized.FindLastIndex(team => _medalByTeamId.ContainsKey(team.TeamId));
-
-        if (lastMedalIndex < 0)
-        {
-            FocusedRowIndex = -1;
-            return;
-        }
-
-        // Replay the skipped ranks silently. Simply jumping to a frozen medal recipient
-        // would leave unresolved teams below them and could produce an incorrect ranking.
-        FocusedRowIndex = PreFreezeRows.Count - 1;
-        while (FocusedRowIndex > lastMedalIndex)
-        {
-            var outcome = Reveal();
-            if (outcome.NeedResort)
-                ResortScoreboard(null);
-            else if (!outcome.Applied)
-                FocusedRowIndex -= 1;
-        }
-    }
-
     private RevealOutcome Reveal()
     {
         if (FocusedRowIndex < 0 || FocusedRowIndex >= PreFreezeRows.Count)
@@ -698,7 +743,9 @@ public sealed class PresentationStageViewModel : ViewModelBase
 
     private bool CanReveal()
     {
-        if (FocusedRowIndex < 0 || FocusedRowIndex >= PreFreezeRows.Count)
+        if (!IsInitialized || !IsStarted ||
+            StartupPhase is not (PresentationStartupPhase.Normal or PresentationStartupPhase.ResolvingBelowMedalBoundary) ||
+            FocusedRowIndex < 0 || FocusedRowIndex >= PreFreezeRows.Count)
         {
             return false;
         }
@@ -708,7 +755,8 @@ public sealed class PresentationStageViewModel : ViewModelBase
 
     private bool CanMoveUp()
     {
-        return FocusedRowIndex > 0 && FocusedRowIndex < PreFreezeRows.Count && IsInitialized && IsStarted;
+        return FocusedRowIndex > 0 && FocusedRowIndex < PreFreezeRows.Count && IsInitialized && IsStarted &&
+               StartupPhase is PresentationStartupPhase.Normal or PresentationStartupPhase.ResolvingBelowMedalBoundary;
     }
 
     private bool HasPendingReveal(string teamId)
@@ -1197,6 +1245,15 @@ public readonly record struct RevealOutcome(bool Applied, bool Solved, bool Need
 }
 
 public sealed record MoveUpAnimationRequest(string TeamId, int FromIndex, int ToIndex, long RequestId);
+
+public enum PresentationStartupPhase
+{
+    Inactive,
+    BrowsingFrozenScoreboard,
+    ResolvingBelowMedalBoundary,
+    AwaitingMedalBoundary,
+    Normal
+}
 
 public enum PresentationRowState
 {

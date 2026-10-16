@@ -25,6 +25,7 @@ public sealed class PresentationConfig
     public string TeamPhotoExtension { get; set; } = "jpg";
     public string? TeamPhotoFallbackPath { get; set; }
     public bool SkipNoMedal { get; set; }
+    public float IntroScrollSeconds { get; set; } = 8.0f;
     public bool AutoAdvanceEnabled { get; set; }
     public bool BatchAwardEnabled { get; set; }
     public float AutoAdvanceIntervalSeconds { get; set; } = 1.0f;
@@ -58,6 +59,11 @@ public sealed class PresentationConfig
 
         if (table.TryGetValue("skip_no_medal", out var skipNoMedal) && skipNoMedal is bool skip)
             config.SkipNoMedal = skip;
+
+        if (table.TryGetValue("intro_scroll_seconds", out var introScrollSeconds))
+            config.IntroScrollSeconds = NormalizeDuration(
+                ConvertToFloat(introScrollSeconds, config.IntroScrollSeconds),
+                config.IntroScrollSeconds);
 
         if (table.TryGetValue("auto_advance_enabled", out var autoAdvanceEnabled) && autoAdvanceEnabled is bool enabled)
             config.AutoAdvanceEnabled = enabled;

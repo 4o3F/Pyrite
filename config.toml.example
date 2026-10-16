@@ -8,12 +8,17 @@ row_fly_animation_seconds = 0.5
 logo_extension = "jpg"
 team_photo_extension = "jpg"
 team_photo_fallback_path = "/135769226_p0.png"
-# Silently resolve the ranks below the last medal recipient before presentation starts.
+# After the frozen-scoreboard browse, auto-resolve rows below the lowest final medal rank,
+# then wait at that row. Applies even when auto_advance_enabled = false; custom awards
+# do not affect the cutoff, and award pages are suppressed during this lead-in.
 skip_no_medal = true
+# Opening top-to-bottom browse duration, after a separate one-second pause at the top.
+intro_scroll_seconds = 8.0
 auto_advance_enabled = false
 # Show a collective award page after each medal batch (default: false).
 # Independent of auto_advance_enabled; each medal's batch_size sets the group size.
 batch_award_enabled = false
+# Seconds per logical step (not per team), also used by the below-medal-boundary lead-in.
 auto_advance_interval_seconds = 1.0
 # Time to show each award page after its fade-in, separate from normal resolution steps.
 auto_advance_award_interval_seconds = 5.0

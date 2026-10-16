@@ -19,6 +19,7 @@ public partial class PresentationStageView : UserControl
 {
     private const double FocusAnchorRatio = 2.0 / 3.0;
     private const double ScrollEpsilon = 0.5;
+    private const double IntroTopPauseSeconds = 1;
     private static readonly TimeSpan FocusScrollDuration = TimeSpan.FromMilliseconds(180);
     private static readonly TimeSpan AwardOverlayFadeDuration = TimeSpan.FromMilliseconds(260);
     private static readonly TimeSpan BatchAwardFadeDuration = TimeSpan.FromMilliseconds(350);
@@ -31,6 +32,11 @@ public partial class PresentationStageView : UserControl
     private DispatcherTimer? _awardOverlayFadeTimer;
     private DispatcherTimer? _batchAwardFadeTimer;
     private DispatcherTimer? _autoAdvanceTimer;
+    private bool _introScrollActive;
+    private double _introScrollElapsedSeconds;
+    private ScrollViewer? _introScrollViewer;
+    private PresentationStageViewModel? _introScrollViewModel;
+    private long _introScrollStartTimestamp;
     private ScrollViewer? _animatedScrollViewer;
     private long _animationStartTimestamp;
     private long _awardOverlayFadeStartTimestamp;
@@ -63,6 +69,7 @@ public partial class PresentationStageView : UserControl
             SyncViewportToViewModel();
             RequestFocusedRowAnchor();
         };
+        ScoreboardList.LayoutUpdated += (_, _) => TryStartIntroScroll();
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
@@ -145,6 +152,7 @@ public partial class PresentationStageView : UserControl
         SetBatchAwardOverlayVisibilityImmediate((DataContext as PresentationStageViewModel)?.IsBatchAwardVisible ?? false);
         Focus();
         SyncViewportToViewModel();
+        TryStartIntroScroll();
         RequestFocusedRowAnchor();
         ResetAutoAdvanceTimer();
     }
@@ -153,6 +161,7 @@ public partial class PresentationStageView : UserControl
     {
         _isAttachedToVisualTree = false;
         StopAutoAdvanceTimer();
+        StopIntroScroll();
         StopScrollAnimation();
         StopAllMoveUpAnimations();
         StopAwardOverlayFadeAnimation();
@@ -162,6 +171,8 @@ public partial class PresentationStageView : UserControl
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
         StopAutoAdvanceTimer();
+        StopIntroScroll();
+        StopScrollAnimation();
         StopAllMoveUpAnimations();
         _lastHandledMoveUpRequestId = 0;
 
@@ -189,8 +200,77 @@ public partial class PresentationStageView : UserControl
         }
 
         SyncViewportToViewModel();
+        TryStartIntroScroll();
         RequestFocusedRowAnchor();
         ResetAutoAdvanceTimer();
+    }
+
+    private void TryStartIntroScroll()
+    {
+        if (!_isAttachedToVisualTree || _introScrollActive ||
+            DataContext is not PresentationStageViewModel vm || !vm.IsStarted ||
+            vm.StartupPhase != PresentationStartupPhase.BrowsingFrozenScoreboard)
+            return;
+
+        var scrollViewer = ScoreboardList.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (scrollViewer is null || scrollViewer.Viewport.Height <= 0 || topLevel is null)
+            return;
+
+        StopScrollAnimation();
+        scrollViewer.Offset = new Vector(scrollViewer.Offset.X, 0);
+        _introScrollViewer = scrollViewer;
+        _introScrollViewModel = vm;
+        _introScrollStartTimestamp = Stopwatch.GetTimestamp();
+        _introScrollElapsedSeconds = 0;
+        _introScrollActive = true;
+        topLevel.RequestAnimationFrame(OnIntroScrollFrame);
+    }
+
+    private void OnIntroScrollFrame(TimeSpan _)
+    {
+        if (!_introScrollActive)
+            return;
+
+        var vm = _introScrollViewModel;
+        var scrollViewer = _introScrollViewer;
+        if (!_isAttachedToVisualTree || vm is null || scrollViewer is null || !vm.IsStarted ||
+            !ReferenceEquals(DataContext, vm) || vm.StartupPhase != PresentationStartupPhase.BrowsingFrozenScoreboard)
+        {
+            StopIntroScroll();
+            return;
+        }
+
+        var elapsed = Math.Clamp(Stopwatch.GetElapsedTime(_introScrollStartTimestamp).TotalSeconds -
+            IntroTopPauseSeconds, 0, vm.IntroScrollSeconds);
+        var remainingSeconds = vm.IntroScrollSeconds - _introScrollElapsedSeconds;
+        var frameProgress = remainingSeconds > 0
+            ? Math.Clamp((elapsed - _introScrollElapsedSeconds) / remainingSeconds, 0, 1)
+            : 1;
+        var maxOffset = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+        // Virtualized rows can revise the estimated extent as they are measured. Advance
+        // from the current offset instead of reprojecting the entire elapsed percentage,
+        // which otherwise makes each extent correction appear as a sudden jump.
+        var offset = scrollViewer.Offset.Y;
+        scrollViewer.Offset = new Vector(scrollViewer.Offset.X,
+            Math.Clamp(offset + Math.Max(0, maxOffset - offset) * frameProgress, 0, maxOffset));
+        _introScrollElapsedSeconds = elapsed;
+        if (elapsed >= vm.IntroScrollSeconds)
+        {
+            StopIntroScroll();
+            vm.CompleteIntroScroll();
+        }
+        else if (TopLevel.GetTopLevel(this) is { } topLevel)
+            topLevel.RequestAnimationFrame(OnIntroScrollFrame);
+        else
+            StopIntroScroll();
+    }
+
+    private void StopIntroScroll()
+    {
+        _introScrollActive = false;
+        _introScrollViewer = null;
+        _introScrollViewModel = null;
     }
 
     private void OnViewSizeChanged(object? sender, SizeChangedEventArgs e)
@@ -234,6 +314,25 @@ public partial class PresentationStageView : UserControl
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is nameof(PresentationStageViewModel.StartupPhase) or nameof(PresentationStageViewModel.IsStarted))
+        {
+            if (DataContext is PresentationStageViewModel { IsStarted: true,
+                    StartupPhase: PresentationStartupPhase.BrowsingFrozenScoreboard })
+                TryStartIntroScroll();
+            else
+                StopIntroScroll();
+            if (DataContext is not PresentationStageViewModel { IsStarted: true })
+            {
+                StopScrollAnimation();
+                StopAllMoveUpAnimations();
+                StopAwardOverlayFadeAnimation();
+                StopBatchAwardFadeAnimation();
+                _anchorRequestQueued = false;
+                _deferredRetryQueued = false;
+            }
+            ResetAutoAdvanceTimer();
+        }
+
         if (e.PropertyName == nameof(PresentationStageViewModel.IsBatchAwardVisible))
         {
             var isVisible = (DataContext as PresentationStageViewModel)?.IsBatchAwardVisible ?? false;
@@ -379,7 +478,8 @@ public partial class PresentationStageView : UserControl
 
     private void RequestFocusedRowAnchor()
     {
-        if (_anchorRequestQueued)
+        if (_anchorRequestQueued || DataContext is not PresentationStageViewModel vm ||
+            !vm.IsStarted || vm.StartupPhase == PresentationStartupPhase.BrowsingFrozenScoreboard)
         {
             return;
         }
@@ -394,7 +494,8 @@ public partial class PresentationStageView : UserControl
 
     private void TryAnchorFocusedRow(bool allowDeferredRetry)
     {
-        if (DataContext is not PresentationStageViewModel vm)
+        if (DataContext is not PresentationStageViewModel vm || !vm.IsStarted ||
+            vm.StartupPhase == PresentationStartupPhase.BrowsingFrozenScoreboard)
         {
             return;
         }
@@ -540,9 +641,10 @@ public partial class PresentationStageView : UserControl
     private void TryStartMoveUpAnimation(MoveUpAnimationRequest request, bool allowDeferredRetry)
     {
         Trace.WriteLine($"[MoveUpAnim] TryStart: id={request.RequestId}, team={request.TeamId}, from={request.FromIndex}, to={request.ToIndex}, retry={allowDeferredRetry}.");
-        if (DataContext is not PresentationStageViewModel vm)
+        if (DataContext is not PresentationStageViewModel vm || !vm.IsStarted ||
+            vm.StartupPhase == PresentationStartupPhase.BrowsingFrozenScoreboard)
         {
-            Trace.WriteLine("[MoveUpAnim] Abort: DataContext is not PresentationStageViewModel.");
+            Trace.WriteLine("[MoveUpAnim] Abort: presentation is not resolving rows.");
             return;
         }
 
